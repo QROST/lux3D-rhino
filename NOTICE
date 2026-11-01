@@ -1,8 +1,8 @@
 Lux3D for Rhino
-Copyright 2026 QROST / Zhongding Cui (addincui)
+Copyright 2026 CuriousArc / qrost
 
 Contains adapted GLB validation, network policy, and Rhino integration patterns
-from Tripo-Rhino, Copyright 2026 QROST / Zhongding Cui (addincui), Apache-2.0.
+from Tripo-Rhino, Copyright 2026 qrost, Apache-2.0.
 Reference commit: 838fbd8 (full commit recorded in docs/architecture.md).
 Modified files carry attribution notices. This product is not affiliated with
 or endorsed by Manycore, Aholo, Tripo, or McNeel.

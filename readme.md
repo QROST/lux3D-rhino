@@ -2,21 +2,22 @@
 
 English | [简体中文](readme.zh-CN.md)
 
-An independent Rhino integration by **CuriousArc · QROST / Zhongding Cui (addincui)**, not an official Manycore, Aholo, or McNeel product. Features include Manycore OAuth sign-in, Lux3D text/single-image generation, persistent asset caching, GLB candidate previews, and independent Block placement. The current version is **0.1.4-beta.2**. This Yak distribution targets **macOS / Rhino 8.32+**. Windows implementation and build scripts are present; host acceptance and a public Windows distribution remain pending.
+An independent Rhino integration by **CuriousArc · qrost**, not an official Manycore, Aholo, or McNeel product. Features include Manycore OAuth sign-in, Lux3D text/single-image generation, persistent asset caching, GLB candidate previews, and independent Block placement. The current version is **0.1.4-beta.3**. This Yak distribution targets **macOS / Rhino 8.32+**. Windows implementation and build scripts are present; host acceptance and a public Windows distribution remain pending.
 
 **Generating models in this version requires an API Key for the selected region. Signing in with Manycore OAuth does not remove that requirement. You can also skip OAuth sign-in in the plugin and configure an API Key directly.**
 
-See [verification records](docs/verification.md) for the current status. The user has confirmed OAuth sign-in, API Key generation, and successful placement/display of the Buddha model with version 0.1.3 on macOS. The new 0.1.4-beta.2 UI and preview interactions, full PBR, Undo/Redo, save/reopen behavior, and Windows host acceptance still require focused verification. Success with an earlier version does not establish acceptance of new changes.
+See [verification records](docs/verification.md) for the current status. The user has confirmed OAuth sign-in, API Key generation, and successful placement/display of the Buddha model with version 0.1.3 on macOS. The new 0.1.4-beta.3 UI and preview interactions, full PBR, Undo/Redo, save/reopen behavior, and Windows host acceptance still require focused verification. Success with an earlier version does not establish acceptance of new changes.
 
 ## This preview release
 
-- Rhino Plug-in Properties now includes **CuriousArc** as Publisher, the project website, and a description with the individual author credit. These native fields are separate from Yak authors; beta.1 omitted them. Restart Rhino after upgrading.
+- Public attribution uses **CuriousArc · qrost** throughout the documentation, copyright notice, Yak metadata, and plug-in description.
+- Rhino Plug-in Properties now includes **CuriousArc** as Publisher, the project website, and a description with the maintainer handle. These native fields are separate from Yak authors; beta.1 omitted them. Restart Rhino after upgrading.
 - Set height, position, and rotation directly on the Generate tab, with visible API Key status. Remove individual candidates without clearing the group.
 - Placement reports actual stages and elapsed time. Task results and errors remain available during the panel session; automatic queries do not overwrite unresolved import errors.
 - Size and angle changes reuse the current candidate's meshes and materials, with rapid input changes coalesced. There are no new geometry count limits or automatic decimation.
 - Direct placement reads, validates, and snapshots files in the background. Native Rhino preflight and final import still run on the UI thread and may briefly block interaction. Diagnostics include monotonic stage timings; no measured speedup factor is claimed yet.
 
-The Yak package name is `lux3d-rhino`, version `0.1.4-beta.2`. In Rhino for macOS, run `PackageManager`, enable prerelease versions, and select this version. Save your documents and restart Rhino after installation. The .NET 8 Runtime and a regional API Key are still required. You can also build a local candidate from source using the steps below; consult the [verification records](docs/verification.md) and Yak server for upload status.
+The Yak package name is `lux3d-rhino`, version `0.1.4-beta.3`. In Rhino for macOS, run `PackageManager`, enable prerelease versions, and select this version. Save your documents and restart Rhino after installation. The .NET 8 Runtime and a regional API Key are still required. You can also build a local candidate from source using the steps below; consult the [verification records](docs/verification.md) and Yak server for upload status.
 
 ## OAuth sign-in and generation authorization
 

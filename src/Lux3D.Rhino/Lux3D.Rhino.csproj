@@ -3,7 +3,7 @@
     <TargetFramework>net7.0</TargetFramework>
     <AssemblyName>Lux3D.Rhino</AssemblyName>
     <RootNamespace>Lux3D.Rhino</RootNamespace>
-    <Description>Lux3D for Rhino by CuriousArc and QROST / Zhongding Cui (addincui). Text-to-3D and single-image-to-3D generation, GLB previews, and native Block placement. Requires a regional Aholo API Key; Manycore OAuth sign-in is optional. Independent community integration, not an official Manycore, Aholo, or McNeel product.</Description>
+    <Description>Lux3D for Rhino by CuriousArc and qrost. Text-to-3D and single-image-to-3D generation, GLB previews, and native Block placement. Requires a regional Aholo API Key; Manycore OAuth sign-in is optional. Independent community integration, not an official Manycore, Aholo, or McNeel product.</Description>
     <TargetExt>.rhp</TargetExt>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>

@@ -6,9 +6,9 @@
 | 文档日期 | 2026-10-31（America/Los_Angeles） |
 | 状态 | 开发交接稿；需求、技术方案与验收计划已形成，Lux3D 插件尚未实施验收 |
 | 产品名称 | Lux3D for Rhino |
-| 项目目录 | `/Users/addincui/Github/Lux3D-Rhino` |
+| 项目目录 | `/path/to/lux3D-rhino` |
 | 建议文件位置 | 项目根目录 `PRD.md` |
-| 产品负责人 | Addin Cui |
+| 产品负责人 | CuriousArc / qrost |
 | 首发宿主 | Rhino 8；macOS 优先完成实际验收，Windows 独立验证 |
 | 主要参考工程 | [QROST/tripo-rhino](https://github.com/QROST/tripo-rhino) |
 
@@ -477,7 +477,7 @@ M0 的区域/API 问题不应阻断无网络依赖的 M1。缺少某一真实宿
 
 ### 16.1 接手后的首批动作
 
-1. 打开 `/Users/addincui/Github/Lux3D-Rhino`，读取该目录及父目录的 `AGENTS.md` 和现有项目说明。
+1. 打开 `/path/to/lux3D-rhino`，读取该目录及父目录的 `AGENTS.md` 和现有项目说明。
 2. 检查已有文件、git 状态、分支与 remote，保留用户已有修改。目录名不证明已经存在远端仓库。
 3. 记录 Tripo-Rhino 的参考 commit、许可证、构建基线与复制来源。
 4. 建立独立插件身份、路径和凭证命名空间，明确 P0 支持平台。

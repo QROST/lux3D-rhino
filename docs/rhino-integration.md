@@ -53,16 +53,16 @@ GLB 在独立 headless RhinoDoc 中由 Rhino 原生 importer 解码。Core 与 H
 
 ## 用户在 Rhino 中运行离线自测
 
-以下为后续验收步骤，本轮按用户要求未执行。加载候选插件后，输入以下命令（完整绝对路径；第二个参数是允许创建证据的目录）：
+以下为后续验收步骤，本轮按用户要求未执行。加载候选插件后，输入以下命令（请将 `/path/to/lux3D-rhino` 替换为实际仓库绝对路径；第二个参数是允许创建证据的目录）：
 
 ```text
-Lux3DSelfTest "/Users/addincui/Github/lux3D-rhino/fixtures/asymmetric-pbr.glb" "/tmp/lux3d-rhino-evidence"
+Lux3DSelfTest "/path/to/lux3D-rhino/fixtures/asymmetric-pbr.glb" "/tmp/lux3d-rhino-evidence"
 ```
 
 再对无材质夹具运行一次：
 
 ```text
-Lux3DSelfTest "/Users/addincui/Github/lux3D-rhino/fixtures/asymmetric-geometry.glb" "/tmp/lux3d-rhino-evidence"
+Lux3DSelfTest "/path/to/lux3D-rhino/fixtures/asymmetric-geometry.glb" "/tmp/lux3d-rhino-evidence"
 ```
 
 Windows 使用对应的绝对路径，例如（请替换为实际仓库位置）：

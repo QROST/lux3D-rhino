@@ -1,8 +1,8 @@
 name: lux3d-rhino
-version: 0.1.4-beta.2
+version: 0.1.4-beta.3
 authors:
   - CuriousArc
-  - QROST / Zhongding Cui (addincui)
+  - qrost
 description: >-
   Lux3D for Rhino by CuriousArc is an independent community integration for
   text-to-3D and single-image-to-3D generation, GLB candidate previews, and

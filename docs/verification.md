@@ -112,11 +112,11 @@ Shell 脚本通过 `bash -n`，Python 脚本通过 AST 语法解析，差异通�
 
 新增宿主自测覆盖 20 次预览参数变换的缓存身份、源网格 CRC、包围盒/矩阵、首次校验及 Clear/Dispose；本轮仅编译，未运行 Rhino。没有使用 Computer Use，也没有新增付费任务。原生导入仍可能短暂阻塞界面，尚未测得可对外宣称的性能倍数。
 
-作者元数据参考 Tripo 的 `QROST / Zhongding Cui (addincui)`；公司品牌依据 [QROST 公开简介](https://github.com/QROST)采用 **CuriousArc**，不添加未经核实的法律实体后缀，保留 NOTICE 中原始版权归属。公开发行按 **macOS / Rhino 8.32+ 预览版**准备，包名 `lux3d-rhino`、版本 `0.1.4-beta.1`；Windows 代码和构建入口保留待实机验收，不发布 `any` 包。最终包与上传结果在完成后另行记录；这段不代表已上传。
+作者元数据参考 Tripo 项目的维护者身份（当前公开昵称为 `qrost`）；公司品牌依据 [qrost 公开简介](https://github.com/QROST)采用 **CuriousArc**，不添加未经核实的法律实体后缀，保留 NOTICE 中原始版权归属。公开发行按 **macOS / Rhino 8.32+ 预览版**准备，包名 `lux3d-rhino`、版本 `0.1.4-beta.1`；Windows 代码和构建入口保留待实机验收，不发布 `any` 包。最终包与上传结果在完成后另行记录；这段不代表已上传。
 
 ## 2026-11-01 Yak 发布与本机安装
 
-`lux3d-rhino 0.1.4-beta.1` 已发布到官方 Yak 服务器，发行标签为 `rh8_32-mac`，`prerelease: true`。作者为 **CuriousArc** 和 **QROST / Zhongding Cui (addincui)**。可在 macOS Rhino 的 `PackageManager` 中启用预览版后搜索安装；本机已完成安装，保存文档并重启 Rhino 后加载新版本。
+`lux3d-rhino 0.1.4-beta.1` 已发布到官方 Yak 服务器，发行标签为 `rh8_32-mac`，`prerelease: true`。发布团队为 **CuriousArc**，维护者为 **qrost**；本记录不再展示历史包中的个人姓名。可在 macOS Rhino 的 `PackageManager` 中启用预览版后搜索安装；本机已完成安装，保存文档并重启 Rhino 后加载新版本。
 
 - 二进制来源：功能提交 `91d4dd7`，发布元数据提交 `454e05d4c8808da3f9dca8299861a0745ab486bd`；打包时工作树干净。最终打包流程再次通过 Release 构建（0 warning / 0 error）、**141/141** 离线测试和夹具再生检查。
 - 包名：`lux3d-rhino-0.1.4-beta.1-rh8_32-mac.yak`，大小 **332,695 字节**，SHA-256 **`e89d6e7cd704c997519526dcf1b1a4d5256ac198c4211c1b101f18e57e1c6d4f`**。
@@ -130,13 +130,20 @@ Shell 脚本通过 `bash -n`，Python 脚本通过 AST 语法解析，差异通�
 
 用户截图确认 beta.1 的 Rhino Plug-in Properties 中 Publisher、Description、Web site 为空。源码复核发现 Yak `authors` 与 .NET `AssemblyCompany` 已设置，但漏掉了 Rhino 专用的 `PlugInDescription` 属性，且没有 `AssemblyDescription`。此前的发布包作者核验没有覆盖这个原生属性页，这是已确认的元数据遗漏。
 
-beta.2 补齐 `DescriptionType.Organization = CuriousArc`、`DescriptionType.WebSite = https://github.com/QROST/lux3D-rhino`；通过 SDK 的 `Description` 生成程序集说明，包含公司、个人作者署名、功能及 API Key 要求。使用 RhinoCommon 的[开发者信息属性](https://developer.rhino3d.com/api/rhinocommon/type/rhino.plugins.plugindescriptionattribute/)；未核实的地址、国家、电话和邮箱不填充。插件 GUID 和生成/导入代码不变。
+beta.2 补齐 `DescriptionType.Organization = CuriousArc`、`DescriptionType.WebSite = https://github.com/QROST/lux3D-rhino`；通过 SDK 的 `Description` 生成程序集说明，包含公司、维护者署名、功能及 API Key 要求。使用 RhinoCommon 的[开发者信息属性](https://developer.rhino3d.com/api/rhinocommon/type/rhino.plugins.plugindescriptionattribute/)；未核实的地址、国家、电话和邮箱不填充。插件 GUID 和生成/导入代码不变。
 
 编译已通过，0 warning / 0 error；直接读取 RHP 的 ECMA-335 程序集元数据验证发布者、网站、说明、完整预发布版本及原 GUID，避免只检查源码或 Yak 清单。宿主属性页的数字版本仍为 `0.1.4.0`，完整 `0.1.4-beta.2` 版本见 Yak 和插件加载消息；[AssemblyVersion 不支持预发布后缀](https://developer.rhino3d.com/en/guides/scripting/projects-create/)。加载新版必须重启 Rhino，不清理用户配置或操作桌面。实际属性页视觉结果仍待用户确认；最终安装和发布结果另行补录。
 
 beta.2 发布后补录：
 
 - 二进制来源提交 `506bf9e81f28d54a522d607fcf34136528b2f8a3`；正式打包构建 0 warning / 0 error，**141/141** 测试及两个夹具再生检查通过。
-- 本机官方 Yak 安装成功，**26/26** 文件匹配；直接检查已安装 `0.1.4-beta.2/Lux3D.Rhino.rhp`，发布者为 `CuriousArc`、网站为项目地址、说明含 `QROST / Zhongding Cui (addincui)`，完整版本及 GUID 正确。
+- 本机官方 Yak 安装成功，**26/26** 文件匹配；直接检查已安装 `0.1.4-beta.2/Lux3D.Rhino.rhp`，发布者为 `CuriousArc`、网站为项目地址、说明包含当时的维护者署名（本记录不再展示个人姓名），完整版本及 GUID 正确。
 - Yak push 返回成功；独立公开版本查询确认 `0.1.4-beta.2` / `rh8_32-mac` / prerelease。重新下载[公开分发包](https://files.mcneel.com/yak/packages/lux3d-rhino-0.1.4-beta.2-rh8_32-mac.yak)，**335,169 字节**，SHA-256 `909cf934d90e721043fdf65d95c8558f768d425ec1ffb14a340a00b3cc18ff10`，与本地安装来源包一致。
 - 元数据、安装、版本响应及下载证据存于 `artifacts/yak-publication-beta2/`；此段为发布后文档补录，不更改已发布归档。尚未代替用户重启后的属性页视觉确认。
+
+
+## 2026-11-01 公开署名统一（0.1.4-beta.3）
+
+按用户要求，当前 README、其他文档、PRD、NOTICE、构建作者、Yak 清单及 Rhino 插件说明统一使用团队名 **CuriousArc** 与昵称 **qrost**。移除公开文档中的个人姓名和本机用户名路径示例；保留实际 GitHub 仓库地址、Tripo 来源、Apache-2.0 许可证及参考提交。历史验证记录只省略个人姓名，不声称此前发布的归档内容已经改变。
+
+本次仅调整文档与署名元数据，生成、凭据和几何导入逻辑不变。旧 Git 提交和已发布的 beta.1/beta.2 包仍是历史版本，本次不重写历史或撤下既有版本。beta.3 的安装和发布结果在完成后补录。
