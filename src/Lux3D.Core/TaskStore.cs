@@ -19,9 +19,14 @@ public sealed class TaskStore
     private string PathFor(Guid id) => Path.Combine(Root, "tasks", id.ToString("N") + ".json");
     public TaskRecord Get(Guid id)
     {
-        var info = new FileInfo(PathFor(id));
-        if (!info.Exists || info.Length > 128 * 1024) throw new IOException("任务记录缺失或过大。");
-        return JsonSerializer.Deserialize<TaskRecord>(File.ReadAllText(info.FullName), LuxJson.Options) ?? throw new IOException("任务记录损坏。");
+        string path = PathFor(id);
+        if (!File.Exists(path)) throw new IOException("任务记录缺失或过大。");
+        // Readers keep their original snapshot while another process atomically replaces the file.
+        // Windows requires delete sharing for that replacement; length and content use one handle.
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        if (stream.Length > 128 * 1024) throw new IOException("任务记录缺失或过大。");
+        using var reader = new StreamReader(stream);
+        return JsonSerializer.Deserialize<TaskRecord>(reader.ReadToEnd(), LuxJson.Options) ?? throw new IOException("任务记录损坏。");
     }
     private IEnumerable<TaskRecord> Records() => Directory.EnumerateFiles(Path.Combine(Root, "tasks"), "*.json")
         .Select(p => Get(Guid.ParseExact(Path.GetFileNameWithoutExtension(p), "N")))

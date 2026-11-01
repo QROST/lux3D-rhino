@@ -3,13 +3,6 @@ using System.Text;
 
 namespace Lux3D.Provider;
 
-public interface ICredentialStore
-{
-    Task<string?> GetAsync(string account, CancellationToken cancellationToken = default);
-    Task SetAsync(string account, string secret, CancellationToken cancellationToken = default);
-    Task DeleteAsync(string account, CancellationToken cancellationToken = default);
-}
-
 /// <summary>Uses macOS Security.framework directly. Secrets never enter process arguments or plaintext files.</summary>
 public sealed class MacKeychainCredentialStore : ICredentialStore
 {

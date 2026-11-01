@@ -1,9 +1,10 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 
 namespace Lux3D.Core;
 
-/// <summary>One private child process per panel. Secrets never cross this protocol.</summary>
+/// <summary>One private child process per panel. OAuth tokens never cross this protocol.</summary>
 public sealed class Lux3DClient : IAsyncDisposable
 {
     private readonly string _directory;
@@ -58,14 +59,21 @@ public sealed class Lux3DClient : IAsyncDisposable
         string executable = Path.Combine(_directory, OperatingSystem.IsWindows() ? "Lux3D.Sidecar.exe" : "Lux3D.Sidecar");
         string dll = Path.Combine(_directory, "Lux3D.Sidecar.dll");
         bool standalone = File.Exists(executable);
-        string dotnet = new[] { "/opt/homebrew/bin/dotnet", "/usr/local/share/dotnet/dotnet", "dotnet" }.First(p => p == "dotnet" || File.Exists(p));
-        var start = new ProcessStartInfo(standalone ? executable : dotnet)
+        if (!standalone && !File.Exists(dll)) throw new IOException("Lux3D 后台文件缺失，请重新安装完整插件包。");
+        var start = new ProcessStartInfo(standalone ? executable : SidecarRuntime.FindDotNet8())
         {
             WorkingDirectory = _directory, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardInputEncoding = new UTF8Encoding(false),
+            StandardOutputEncoding = new UTF8Encoding(false),
+            StandardErrorEncoding = new UTF8Encoding(false)
         };
         if (!standalone) start.ArgumentList.Add(dll);
-        _process = Process.Start(start) ?? throw new IOException("无法启动 Lux3D 后台进程。");
+        try { _process = Process.Start(start) ?? throw new IOException("无法启动 Lux3D 后台进程。"); }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            throw new IOException("无法启动 Lux3D 后台进程。请检查安装文件权限及适用于本机的 .NET 8 Runtime。");
+        }
         // Drain diagnostics without copying provider responses or secrets into Rhino logs.
         _process.ErrorDataReceived += (_, _) => { };
         _process.BeginErrorReadLine();

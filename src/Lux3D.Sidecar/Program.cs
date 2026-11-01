@@ -1,10 +1,13 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Lux3D.Core;
 using Lux3D.Provider;
 using Lux3D.Sidecar;
 
 // Dedicated inherited stdin/stdout pipes: no listening TCP control port and no discovery secret.
+Console.InputEncoding = new UTF8Encoding(false);
+Console.OutputEncoding = new UTF8Encoding(false);
 using var http = Lux3DApiClient.CreateHttpClient();
 if (args.Length == 2 && args[0] == "--oauth-discovery")
 {
@@ -19,7 +22,7 @@ using var download = new HttpClient(new SocketsHttpHandler
 }) { Timeout = TimeSpan.FromMinutes(3) };
 var store = new TaskStore(TaskStore.DefaultRoot);
 var workflow = new Workflow(store);
-var keychain = new MacKeychainCredentialStore();
+var credentials = CredentialStoreFactory.CreateDefault();
 var sessionKeys = new Dictionary<string, ApiKeyCredential>();
 var sessionTokens = new Dictionary<string, OAuthToken>();
 
@@ -40,7 +43,7 @@ if (args.Length == 2 && args[0] is "--oauth-login" or "--oauth-probe")
     }
     catch (OperationCanceledException) { Console.WriteLine("OAuth 已取消或超时，未调用生成。请从 Rhino 面板重新登录。"); Environment.ExitCode = 2; }
     catch (ProviderException ex) { Console.WriteLine(ex.Message); Environment.ExitCode = 2; }
-    catch (Exception) { Console.WriteLine("OAuth 未完成。请检查网络、钥匙串权限和账户授权后重试。"); Environment.ExitCode = 2; }
+    catch (Exception) { Console.WriteLine("OAuth 未完成。请检查网络、系统凭证存储权限和账户授权后重试。"); Environment.ExitCode = 2; }
     return;
 }
 
@@ -107,10 +110,10 @@ async Task<object> Dispatch(RpcRequest request, CancellationToken ct)
             var key = new ApiKeyCredential(selected, p.GetProperty("apiKey").GetString() ?? "");
             await new Lux3DApiClient(http, key).VerifyConnectionAsync(ct);
             bool persist = p.GetProperty("persist").GetBoolean();
-            if (persist) await keychain.SetAsync("api-key:" + region, p.GetProperty("apiKey").GetString()!, ct);
-            else await keychain.DeleteAsync("api-key:" + region, ct);
+            if (persist) await credentials.SetAsync("api-key:" + region, p.GetProperty("apiKey").GetString()!, ct);
+            else await credentials.DeleteAsync("api-key:" + region, ct);
             sessionKeys[region] = key;
-            return new ConnectionInfo(region, true, persist ? "API 连接验证通过，已保存至 macOS 钥匙串。" : "API 连接验证通过，仅本次会话使用。", true);
+            return new ConnectionInfo(region, true, persist ? "API 连接验证通过，已保存至系统凭证存储。" : "API 连接验证通过，仅本次会话使用。", true);
         }
         case "login":
         {
@@ -124,14 +127,14 @@ async Task<object> Dispatch(RpcRequest request, CancellationToken ct)
             }, ct);
             sessionTokens[region] = token;
             // User's OAuth session is recoverable; no token enters a task journal or Rhino document.
-            await keychain.SetAsync("oauth:" + region, JsonSerializer.Serialize(token, LuxJson.Options), ct);
+            await credentials.SetAsync("oauth:" + region, JsonSerializer.Serialize(token, LuxJson.Options), ct);
             OAuthMcpInspection inspection = await new OAuthMcpProbe(http).InspectAsync(token, ct);
-            return new ConnectionInfo(region, true, "Manycore OAuth 登录成功，凭证已保存至钥匙串。" + inspection.Message + " 当前生成使用区域 API Key。", await GetKey(region, ct) is not null);
+            return new ConnectionInfo(region, true, "Manycore OAuth 登录成功，凭证已保存至系统凭证存储。" + inspection.Message + " 当前生成使用区域 API Key。", await GetKey(region, ct) is not null);
         }
         case "logout":
             sessionKeys.Remove(region); sessionTokens.Remove(region);
-            await keychain.DeleteAsync("api-key:" + region, ct);
-            await keychain.DeleteAsync("oauth:" + region, ct);
+            await credentials.DeleteAsync("api-key:" + region, ct);
+            await credentials.DeleteAsync("oauth:" + region, ct);
             return new ConnectionInfo(region, false, "本机连接已移除。远程授权可在官方账户页面管理。");
         case "generate":
         {
@@ -145,7 +148,7 @@ async Task<object> Dispatch(RpcRequest request, CancellationToken ct)
 async Task<ApiKeyCredential?> GetKey(string region, CancellationToken ct)
 {
     if (sessionKeys.TryGetValue(region, out var current)) return current;
-    string? value = await keychain.GetAsync("api-key:" + region, ct);
+    string? value = await credentials.GetAsync("api-key:" + region, ct);
     if (value is null) return null;
     return sessionKeys[region] = new(LuxRegions.Parse(region), value);
 }
@@ -153,7 +156,7 @@ async Task<OAuthToken?> GetToken(string region, CancellationToken ct)
 {
     if (!sessionTokens.TryGetValue(region, out var token))
     {
-        string? value = await keychain.GetAsync("oauth:" + region, ct);
+        string? value = await credentials.GetAsync("oauth:" + region, ct);
         if (value is null) return null;
         token = JsonSerializer.Deserialize<OAuthToken>(value, LuxJson.Options);
         if (token is null) return null;
@@ -161,7 +164,7 @@ async Task<OAuthToken?> GetToken(string region, CancellationToken ct)
     if (token.ExpiresAt <= DateTimeOffset.UtcNow.AddMinutes(1) && !string.IsNullOrEmpty(token.RefreshToken))
     {
         token = await new ManycoreOAuthService(http).RefreshAsync(token, ct);
-        await keychain.SetAsync("oauth:" + region, JsonSerializer.Serialize(token, LuxJson.Options), ct);
+        await credentials.SetAsync("oauth:" + region, JsonSerializer.Serialize(token, LuxJson.Options), ct);
     }
     return sessionTokens[region] = token;
 }
