@@ -29,7 +29,8 @@ public sealed record PlacementIntent(Plane Plane, Point3d Point, double Height, 
 }
 
 public sealed record ImportReceipt(Guid ImportId, Guid ObjectId, string DocumentSessionId, string AssetSha256, string State);
-public sealed record AssetAudit(long Meshes, long Vertices, long Triangles, int Materials, int Textures, BoundingBox Bounds);
+public sealed record AssetAudit(long Meshes, long Vertices, long Triangles, int Materials, int Textures, BoundingBox Bounds,
+    long RemovedDegenerateFaces = 0, long RecomputedNormalMeshes = 0);
 
 public sealed class PreparedAsset : IDisposable
 {
@@ -98,12 +99,14 @@ public sealed class Lux3DHostService : IDisposable
         foreach (var key in _fingerprints.Keys.Where(k => k.Item1 == serial).ToArray()) _fingerprints.Remove(key);
         foreach (var key in _deletedStates.Keys.Where(k => k.Item1 == serial).ToArray()) _deletedStates.Remove(key);
     }
-    public PreparedAsset Prepare(string path, string? expectedSha256, RhinoDoc target)
+    public PreparedAsset Prepare(string path, string? expectedSha256, RhinoDoc target, HostImportTrace? trace = null)
     {
         RequireUiThread();
+        trace?.Record("preflight_start");
         if (!File.Exists(path)) throw new FileNotFoundException("本地 GLB 不存在。", path);
         byte[] bytes = File.ReadAllBytes(path);
         GlbContainerValidator.Validate(bytes);
+        trace?.Record("preflight_container_valid");
         string sha = Convert.ToHexString(SHA256.HashData(bytes));
         if (expectedSha256 is not null && !string.Equals(sha, expectedSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("GLB 哈希与任务记录不一致。");
@@ -117,14 +120,37 @@ public sealed class Lux3DHostService : IDisposable
             stage = RhinoDoc.CreateHeadless(null) ?? throw new InvalidOperationException("无法创建独立预览文档。");
             stage.ModelUnitSystem = target.ModelUnitSystem;
             stage.ModelAbsoluteTolerance = target.ModelAbsoluteTolerance;
-            if (!stage.Import(snapshot, new ArchivableDictionary())) throw new InvalidOperationException("Rhino 无法导入此 GLB。");
-            AssetAudit audit = Audit(Objects(stage));
+            HashSet<Guid> existingDefinitions = stage.InstanceDefinitions.GetList(true).Select(d => d.Id).ToHashSet();
+            trace?.Record("preflight_native_import_start");
+            bool imported;
+            try { imported = stage.Import(snapshot, new ArchivableDictionary()); }
+            catch (Exception ex)
+            {
+                trace?.Record("preflight_native_import_exception", ex.Message);
+                throw new InvalidOperationException("预检阶段：Rhino 原生 GLB 导入发生异常，尚未进入网格修复。" + ex.Message, ex);
+            }
+            trace?.Record("preflight_native_import_result", imported ? "true" : "false");
+            if (!imported) throw new InvalidOperationException("预检阶段：Rhino 原生 GLB 导入失败，尚未进入网格修复。");
+            RhinoObject[] roots = Objects(stage);
+            using MeshRepairs repairs = CreateMeshRepairs(roots, trace);
+            ApplyDefinitionRepairs(stage, roots, repairs, existingDefinitions, trace);
+            // Replacement may create a proxy undo record. It is confined to the disposable headless document.
+            foreach (RhinoObject root in roots)
+                if (repairs.Meshes.TryGetValue(root.Id, out Mesh? repaired) && !stage.Objects.Replace(root.Id, repaired))
+                    throw new InvalidOperationException("预检阶段：无法替换已修复的临时网格。");
+            AssetAudit audit = Audit(Objects(stage)) with
+            {
+                RemovedDegenerateFaces = repairs.RemovedFaces,
+                RecomputedNormalMeshes = repairs.Meshes.Count,
+            };
+            trace?.Record("preflight_audit_complete", AuditDetail(audit));
             return new PreparedAsset(snapshot, sha, stage, audit, Session(target), target.RuntimeSerialNumber);
         }
-        catch
+        catch (Exception ex)
         {
-            stage?.Dispose();
-            Directory.Delete(directory, true);
+            trace?.Record("preflight_failed", ex.Message);
+            try { stage?.Dispose(); } catch { }
+            try { Directory.Delete(directory, true); } catch { }
             throw;
         }
     }
@@ -152,9 +178,10 @@ public sealed class Lux3DHostService : IDisposable
             ? "Imported" : missing;
         return receipt with { State = state };
     }
-    public ImportReceipt Commit(PreparedAsset asset, PlacementIntent placement, Guid importId, Guid? generationOperationId = null)
+    public ImportReceipt Commit(PreparedAsset asset, PlacementIntent placement, Guid importId, Guid? generationOperationId = null, HostImportTrace? trace = null)
     {
         RequireUiThread();
+        trace?.Record("commit_start");
         if (importId == Guid.Empty) throw new ArgumentException("导入编号不能为空。", nameof(importId));
         RhinoDoc doc = RhinoDoc.FromRuntimeSerialNumber(asset.DocumentSerial) ?? throw new InvalidOperationException("目标文档已关闭。");
         if (Session(doc) != asset.DocumentSessionId) throw new InvalidOperationException("目标文档会话已失效。");
@@ -168,10 +195,13 @@ public sealed class Lux3DHostService : IDisposable
             throw new InvalidOperationException("此导入已失败，不能自动重放；请核对文档后明确建立新导入。");
         }
         if (doc.UndoRecordingIsActive) throw new InvalidOperationException("请等待当前 Rhino 命令结束后接受候选。");
+        int targetLayerIndex = doc.Layers.CurrentLayerIndex;
         asset.Verify();
         string durableImportPath = PersistImportSnapshot(asset);
+        trace?.Record("commit_snapshot_verified");
         Transform transform = placement.ToTransform(asset.Audit.Bounds);
         HashSet<Guid> before = Objects(doc).Select(o => o.Id).ToHashSet();
+        HashSet<Guid> definitionsBefore = doc.InstanceDefinitions.GetList(true).Select(d => d.Id).ToHashSet();
         string beforeState = DocumentState(doc);
         uint undo = doc.BeginUndoRecord("接受 Lux3D 候选");
         if (undo == 0) throw new InvalidOperationException("无法创建撤销记录，未导入。");
@@ -188,30 +218,55 @@ public sealed class Lux3DHostService : IDisposable
             using (var markerAttributes = new ObjectAttributes())
                 definitionIndex = doc.InstanceDefinitions.Add("Lux3D_" + importId.ToString("N"), "Lux3D native GLB; SHA256 " + asset.Sha256, Point3d.Origin, new[] { marker }, new[] { markerAttributes });
             if (definitionIndex < 0) throw new InvalidOperationException("创建 Lux3D Block 失败。");
-            if (!doc.Import(durableImportPath, new ArchivableDictionary())) throw new InvalidOperationException("Rhino 导入失败。");
+            trace?.Record("commit_native_import_start");
+            bool importedNative;
+            try { importedNative = doc.Import(durableImportPath, new ArchivableDictionary()); }
+            catch (Exception ex)
+            {
+                trace?.Record("commit_native_import_exception", ex.Message);
+                throw new InvalidOperationException("正式导入阶段：Rhino 原生 GLB 导入发生异常，尚未进入本次网格修复。" + ex.Message, ex);
+            }
+            trace?.Record("commit_native_import_result", importedNative ? "true" : "false");
+            if (!importedNative) throw new InvalidOperationException("正式导入阶段：Rhino 原生 GLB 导入失败，尚未进入本次网格修复。");
             VerifyHash(durableImportPath, asset.Sha256);
             asset.Verify();
             RhinoObject[] added = Objects(doc).Where(o => !before.Contains(o.Id)).ToArray();
-            AssetAudit imported = Audit(added);
+            using MeshRepairs repairs = CreateMeshRepairs(added, trace);
+            ApplyDefinitionRepairs(doc, added, repairs, definitionsBefore, trace);
+            added = Objects(doc).Where(o => !before.Contains(o.Id)).ToArray();
+            // Top-level meshes are repaired only in the copies used for the new Block.
+            // Do not call ObjectTable.Replace on the user's document: its proxy command may add an undo record.
+            AssetAudit imported = Audit(added, repairs.Meshes) with
+            {
+                RemovedDegenerateFaces = repairs.RemovedFaces,
+                RecomputedNormalMeshes = repairs.Meshes.Count,
+            };
             if (imported.Meshes != asset.Audit.Meshes || imported.Vertices != asset.Audit.Vertices || imported.Triangles != asset.Audit.Triangles ||
                 !imported.Bounds.Min.EpsilonEquals(asset.Audit.Bounds.Min, doc.ModelAbsoluteTolerance) ||
                 !imported.Bounds.Max.EpsilonEquals(asset.Audit.Bounds.Max, doc.ModelAbsoluteTolerance))
                 throw new InvalidOperationException("导入几何与预览结果不一致。");
+            trace?.Record("commit_audit_complete", AuditDetail(imported));
             foreach (RhinoObject obj in added)
             {
-                geometry.Add(obj.Geometry.Duplicate());
+                geometry.Add(repairs.Meshes.TryGetValue(obj.Id, out Mesh? repaired) ? repaired.DuplicateMesh() : obj.Geometry.Duplicate());
                 ObjectAttributes attr = obj.Attributes.Duplicate();
                 attr.SetUserString("Lux3D.AssetSha256", asset.Sha256);
                 attributes.Add(attr);
             }
             if (!doc.InstanceDefinitions.ModifyGeometry(definitionIndex, geometry, attributes)) throw new InvalidOperationException("写入 Lux3D Block 几何失败。");
-            ObjectAttributes instanceAttributes = new() { Name = "Lux3D" };
+            trace?.Record("commit_block_geometry_ready");
+            using ObjectAttributes instanceAttributes = doc.CreateDefaultAttributes();
+            instanceAttributes.Name = "Lux3D";
+            instanceAttributes.LayerIndex = targetLayerIndex;
+            instanceAttributes.Space = ActiveSpace.ModelSpace;
+            instanceAttributes.ViewportId = Guid.Empty;
             instanceAttributes.SetUserString("Lux3D.ImportId", importId.ToString("D"));
             instanceAttributes.SetUserString("Lux3D.AssetSha256", asset.Sha256);
             instanceAttributes.SetUserString("Lux3D.DocumentSession", asset.DocumentSessionId);
             if (generationOperationId.HasValue) instanceAttributes.SetUserString("Lux3D.GenerationOperationId", generationOperationId.Value.ToString("D"));
             instanceId = doc.Objects.AddInstanceObject(definitionIndex, transform, instanceAttributes);
             if (instanceId == Guid.Empty) throw new InvalidOperationException("放置 Lux3D Block 失败。");
+            trace?.Record("commit_instance_added", instanceId.ToString("D"));
             if (doc.Objects.Delete(added.Select(o => o.Id), true) != added.Length) throw new InvalidOperationException("无法移除本次导入的临时顶层对象。");
             if (Objects(doc).Count(o => !before.Contains(o.Id)) != 1) throw new InvalidOperationException("导入生成了非预期顶层对象。");
         }
@@ -224,6 +279,7 @@ public sealed class Lux3DHostService : IDisposable
         }
         if (failure is not null)
         {
+            trace?.Record("commit_rollback_start", failure.Message);
             // The record was started here and no concurrent UI commands can run inside this synchronous block.
             bool restored = DocumentState(doc) == beforeState;
             if (!restored && undoEnded && doc.Undo())
@@ -231,12 +287,14 @@ public sealed class Lux3DHostService : IDisposable
                 doc.ClearRedoRecords();
                 restored = DocumentState(doc) == beforeState;
             }
+            trace?.Record("commit_rollback_result", restored ? "restored" : "unconfirmed");
             if (!restored) throw new InvalidOperationException("导入失败，自动回滚未能确认；请检查文档 Undo。", failure);
             throw new InvalidOperationException("导入失败；本次文档修改已撤销。" + failure.Message, failure);
         }
         if (!undoEnded) throw new InvalidOperationException("导入对象已建立，但无法确认撤销记录；请检查文档，不要重复导入。");
         ImportReceipt receipt = new(importId, instanceId, asset.DocumentSessionId, asset.Sha256, "Imported");
         _receipts.Add((doc.RuntimeSerialNumber, importId), receipt);
+        trace?.Record("commit_complete", instanceId.ToString("D"));
         try { doc.Views.Redraw(); }
         catch { /* View refresh cannot turn a completed document import into a failed import. */ }
         return receipt;
@@ -324,7 +382,100 @@ public sealed class Lux3DHostService : IDisposable
         }
         finally { while (pending.Count > 0) pending.Pop().Objects.Dispose(); }
     }
-    internal static AssetAudit Audit(IEnumerable<RhinoObject> objects)
+    private sealed class MeshRepairs : IDisposable
+    {
+        public Dictionary<Guid, Mesh> Meshes { get; } = new();
+        public long RemovedFaces { get; set; }
+        public void Dispose() { foreach (Mesh mesh in Meshes.Values) mesh.Dispose(); }
+    }
+    private static MeshRepairs CreateMeshRepairs(IEnumerable<RhinoObject> roots, HostImportTrace? trace)
+    {
+        var repairs = new MeshRepairs();
+        var inspected = new HashSet<Guid>();
+        try
+        {
+            foreach (var (mesh, _, source) in Meshes(roots, Transform.Identity))
+            {
+                if (!inspected.Add(source.Id) || mesh.IsValidWithLog(out string beforeLog)) continue;
+                trace?.Record("mesh_repair_start", "mesh=" + source.Id.ToString("D") + "; reason=" + beforeLog);
+                Mesh? repaired = RepairMeshCopy(mesh, out int removed);
+                try
+                {
+                    repairs.RemovedFaces += removed;
+                    repairs.Meshes.Add(source.Id, repaired);
+                    repaired = null; // Ownership moves to the repair set until document copies have been created.
+                    trace?.Record("mesh_repair_valid", $"removedDegenerateFaces={removed}; recomputedNormalMeshes=1");
+                }
+                finally { repaired?.Dispose(); }
+            }
+            trace?.Record("mesh_repair_summary", $"removedDegenerateFaces={repairs.RemovedFaces}; recomputedNormalMeshes={repairs.Meshes.Count}");
+            return repairs;
+        }
+        catch { repairs.Dispose(); throw; }
+    }
+    internal static Mesh RepairMeshCopy(Mesh mesh, out int removedFaces)
+    {
+        removedFaces = 0;
+        bool sourceValid = mesh.IsValidWithLog(out string beforeLog);
+        Mesh repaired = mesh.DuplicateMesh();
+        if (sourceValid) return repaired;
+        try
+        {
+            removedFaces = repaired.Faces.CullDegenerateFaces();
+            bool normalsComputed = repaired.Normals.ComputeNormals();
+            bool valid = repaired.IsValidWithLog(out string afterLog);
+            if (!normalsComputed || !valid)
+                throw new InvalidOperationException("网格有限修复未通过有效性检查。原原因：" + beforeLog + " 修复后：" + afterLog);
+            if (repaired.Vertices.Count != mesh.Vertices.Count || repaired.TextureCoordinates.Count != mesh.TextureCoordinates.Count ||
+                repaired.VertexColors.Count != mesh.VertexColors.Count || repaired.Faces.Count != mesh.Faces.Count - removedFaces)
+                throw new InvalidOperationException("网格修复产生了退化面清理和法向重算以外的变化，已拒绝应用。");
+            return repaired;
+        }
+        catch { repaired.Dispose(); throw; }
+    }
+    private static void ApplyDefinitionRepairs(RhinoDoc doc, IEnumerable<RhinoObject> roots, MeshRepairs repairs,
+        HashSet<Guid> protectedDefinitions, HostImportTrace? trace)
+    {
+        // Native imports can contain nested Blocks. Only definitions created by this import may be modified.
+        // CreateMeshRepairs has already traversed the complete graph and rejected cyclic references.
+        var pending = new Stack<InstanceDefinition>();
+        var visited = new HashSet<Guid>();
+        foreach (RhinoObject root in roots)
+            if (root is InstanceObject instance) pending.Push(instance.InstanceDefinition);
+        while (pending.Count > 0)
+        {
+            InstanceDefinition definition = pending.Pop();
+            if (!visited.Add(definition.Id)) continue;
+            RhinoObject[] members = definition.GetObjects();
+            foreach (RhinoObject member in members)
+                if (member is InstanceObject instance) pending.Push(instance.InstanceDefinition);
+            if (!members.Any(m => repairs.Meshes.ContainsKey(m.Id))) continue;
+            if (protectedDefinitions.Contains(definition.Id))
+                throw new InvalidOperationException("本次导入引用了已有文档中的无效网格定义；未修改用户原有 Block，请先检查该定义。");
+            var geometry = new List<GeometryBase>();
+            var attributes = new List<ObjectAttributes>();
+            try
+            {
+                foreach (RhinoObject member in members)
+                {
+                    geometry.Add(repairs.Meshes.TryGetValue(member.Id, out Mesh? repaired) ? repaired.DuplicateMesh() : member.Geometry.Duplicate());
+                    attributes.Add(member.Attributes.Duplicate());
+                }
+                if (!doc.InstanceDefinitions.ModifyGeometry(definition.Index, geometry, attributes))
+                    throw new InvalidOperationException("无法把已修复网格写入本次导入的新 Block 定义。");
+                trace?.Record("mesh_definition_repaired", definition.Id.ToString("D"));
+            }
+            finally
+            {
+                foreach (GeometryBase item in geometry) item.Dispose();
+                foreach (ObjectAttributes item in attributes) item.Dispose();
+            }
+        }
+    }
+    private static string AuditDetail(AssetAudit audit) =>
+        $"meshes={audit.Meshes}; vertices={audit.Vertices}; triangles={audit.Triangles}; removedDegenerateFaces={audit.RemovedDegenerateFaces}; recomputedNormalMeshes={audit.RecomputedNormalMeshes}";
+
+    internal static AssetAudit Audit(IEnumerable<RhinoObject> objects, IReadOnlyDictionary<Guid, Mesh>? replacements = null)
     {
         long count = 0, vertices = 0, triangles = 0;
         BoundingBox bounds = BoundingBox.Empty;
@@ -332,11 +483,12 @@ public sealed class Lux3DHostService : IDisposable
         HashSet<string> textures = new(StringComparer.Ordinal);
         foreach (var (mesh, transform, source) in Meshes(objects, Transform.Identity))
         {
-            if (!mesh.IsValid) throw new InvalidOperationException("GLB Mesh 无效。");
+            Mesh inspected = replacements is not null && replacements.TryGetValue(source.Id, out Mesh? repaired) ? repaired : mesh;
+            if (!inspected.IsValidWithLog(out string log)) throw new InvalidOperationException("GLB 网格无效：" + log);
             count++;
-            vertices = checked(vertices + mesh.Vertices.Count);
-            triangles = checked(triangles + mesh.Faces.Sum(f => f.IsQuad ? 2L : 1L));
-            bounds.Union(mesh.GetBoundingBox(transform));
+            vertices = checked(vertices + inspected.Vertices.Count);
+            triangles = checked(triangles + inspected.Faces.Sum(f => f.IsQuad ? 2L : 1L));
+            bounds.Union(inspected.GetBoundingBox(transform));
             Material material = source.GetMaterial(true);
             if (material is not null)
             {

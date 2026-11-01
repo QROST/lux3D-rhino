@@ -40,13 +40,14 @@ internal static class TaskPlacementPolicy
     };
     public static string ErrorMessage(Exception exception)
     {
-        if (exception is OutOfMemoryException)
-            return "系统内存不足，未能完成模型放入；原任务和资产记录仍保留。请先检查当前文档，再释放内存并重试原任务，无需重新生成。";
-        if (exception is AssetValidationException validation)
-            return "模型校验未通过（" + validation.Code + "）：" + validation.Message + "；原任务和资产记录仍保留，请勿重复生成。";
-        if (exception is FileNotFoundException or DirectoryNotFoundException)
-            return "模型缓存不存在；请查询原任务重新下载后再放入。";
-        return "未能放入模型：" + exception.Message;
+        string message = exception switch
+        {
+            OutOfMemoryException => "系统内存不足，未能完成模型放入；原任务和资产记录仍保留。请先检查当前文档，再释放内存并重试原任务，无需重新生成。",
+            AssetValidationException validation => "模型校验未通过（" + validation.Code + "）：" + validation.Message + "；原任务和资产记录仍保留，请勿重复生成。",
+            FileNotFoundException or DirectoryNotFoundException => "模型缓存不存在；请查询原任务重新下载后再放入。",
+            _ => "未能放入模型：" + exception.Message,
+        };
+        return exception.Data["Lux3D.DiagnosticPath"] is string report ? message + " 诊断记录：" + report : message;
     }
     private static string Detail(string? error) => string.IsNullOrWhiteSpace(error) ? string.Empty : " 原因：" + error;
 }
@@ -64,7 +65,9 @@ internal sealed class TaskPlacementService
         if (global::Rhino.RhinoApp.InvokeRequired) throw new InvalidOperationException("请从 Rhino 界面发起放置。");
         if (RhinoDoc.ActiveDoc?.RuntimeSerialNumber != doc.RuntimeSerialNumber)
             throw new InvalidOperationException("请先激活面板绑定的目标文档，再放入模型。");
-        if (doc.IsClosing || doc.IsReadOnly || doc.IsLocked) throw new InvalidOperationException("目标文档当前不可写。");
+        // IsLocked means this document owns the on-disk file lock, not that it is read-only.
+        if (doc.IsClosing || doc.IsReadOnly) throw new InvalidOperationException("目标文档当前不可写。");
+        RequireModelViewport(doc);
         return new TaskPlacementTarget(doc.RuntimeSerialNumber, _host.Session(doc), doc.ModelUnitSystem, placement);
     }
     public static PlacementIntent DefaultPlacement(RhinoDoc doc)
@@ -78,24 +81,51 @@ internal sealed class TaskPlacementService
     {
         var key = (target.DocumentSerial, operationId);
         if (!_inFlight.TryAdd(key, 0)) return new TaskPlacementResult("Deferred", "此任务正在放入，请等待本次操作完成。");
+        var trace = NewTrace(operationId, target);
         try
         {
+            trace.Record("read-task");
             TaskRecord task = await _client.GetTaskAsync(operationId).ConfigureAwait(false);
             TaskPlacementResult? existing = await OnUiAsync(() => stillAllowed is not null && !stillAllowed()
                 ? new TaskPlacementResult("Deferred", "放置已暂停；请重新显示面板后手动放入。") : FindExisting(target, task)).ConfigureAwait(false);
-            if (existing is not null) return existing;
+            if (existing is not null) return Finish(trace, existing);
             if (!TaskPlacementPolicy.HasCachedAsset(task) && TaskPlacementPolicy.CanRefresh(task))
+            {
+                trace.Record("recover-original-task");
                 task = await _client.RefreshAsync(operationId).ConfigureAwait(false);
-            return await OnUiAsync(() => PlaceOnUiThread(task, target, stillAllowed)).ConfigureAwait(false);
+            }
+            return Finish(trace, await OnUiAsync(() => PlaceOnUiThread(task, target, stillAllowed, trace)).ConfigureAwait(false));
         }
+        catch (Exception ex) { RecordFailure(trace, ex); throw; }
         finally { _inFlight.TryRemove(key, out _); }
     }
     public async Task<TaskPlacementResult> PlaceReadyAsync(TaskRecord task, TaskPlacementTarget target, Func<bool> stillAllowed)
     {
         var key = (target.DocumentSerial, task.OperationId);
         if (!_inFlight.TryAdd(key, 0)) return new TaskPlacementResult("Deferred", "此任务正在放入，请等待本次操作完成。");
-        try { return await OnUiAsync(() => PlaceOnUiThread(task, target, stillAllowed)).ConfigureAwait(false); }
+        var trace = NewTrace(task.OperationId, target);
+        try { return Finish(trace, await OnUiAsync(() => PlaceOnUiThread(task, target, stillAllowed, trace)).ConfigureAwait(false)); }
+        catch (Exception ex) { RecordFailure(trace, ex); throw; }
         finally { _inFlight.TryRemove(key, out _); }
+    }
+    private static HostImportTrace NewTrace(Guid operationId, TaskPlacementTarget target) => new(operationId,
+        target.DocumentSerial, typeof(Lux3DPlugin).Assembly.GetName().Version?.ToString() ?? "unknown");
+    private static TaskPlacementResult Finish(HostImportTrace trace, TaskPlacementResult result)
+    {
+        trace.Record("result", result.Message);
+        if (result.ObjectId.HasValue) trace.Record("object", result.ObjectId.Value.ToString("D"));
+        trace.Complete(result.State);
+        return result;
+    }
+    private static void RecordFailure(HostImportTrace trace, Exception exception)
+    {
+        trace.Fail(exception);
+        if (trace.IsPersisted) exception.Data["Lux3D.DiagnosticPath"] = trace.ReportPath;
+    }
+    private static void RequireModelViewport(RhinoDoc doc)
+    {
+        if (doc.Views.ActiveView is global::Rhino.Display.RhinoPageView { PageIsActive: true })
+            throw new InvalidOperationException("当前处于布局纸面；请切换到模型视图或激活布局中的模型细节视口，再放入模型。");
     }
     private RhinoDoc ResolveTarget(TaskPlacementTarget target)
     {
@@ -103,7 +133,8 @@ internal sealed class TaskPlacementService
         if (_host.Session(doc) != target.DocumentSession) throw new InvalidOperationException("目标文档会话已改变；请手动重新选择目标文档。");
         if (doc.ModelUnitSystem != target.Units) throw new InvalidOperationException("目标文档单位已改变；请重新确认参考高度后手动放入。");
         if (RhinoDoc.ActiveDoc?.RuntimeSerialNumber != target.DocumentSerial) throw new InvalidOperationException("已切换到其他文档，未自动放入。请激活原文档后点击“放入当前文档”。");
-        if (doc.IsClosing || doc.IsReadOnly || doc.IsLocked) throw new InvalidOperationException("目标文档当前不可写；请恢复后手动放入。");
+        if (doc.IsClosing || doc.IsReadOnly) throw new InvalidOperationException("目标文档当前不可写；请恢复后手动放入。");
+        RequireModelViewport(doc);
         return doc;
     }
     private TaskPlacementResult? FindExisting(TaskPlacementTarget target, TaskRecord task)
@@ -120,24 +151,28 @@ internal sealed class TaskPlacementService
         string zoom = ZoomToObject(doc, receipt.ObjectId);
         return new TaskPlacementResult("Existing", "此任务已在当前文档中；没有重复插入。" + (zoom.Length == 0 ? "已定位已有 Block。" : zoom), receipt.ObjectId);
     }
-    private TaskPlacementResult PlaceOnUiThread(TaskRecord task, TaskPlacementTarget target, Func<bool>? stillAllowed)
+    private TaskPlacementResult PlaceOnUiThread(TaskRecord task, TaskPlacementTarget target, Func<bool>? stillAllowed, HostImportTrace trace)
     {
         if (stillAllowed is not null && !stillAllowed()) return new TaskPlacementResult("Deferred", "自动放置已暂停；重新显示面板可继续。");
         TaskPlacementResult? existing = FindExisting(target, task);
         if (existing is not null) return existing;
         if (!TaskPlacementPolicy.HasCachedAsset(task)) throw new InvalidOperationException(TaskPlacementPolicy.NotReadyMessage(task));
         RhinoDoc doc = ResolveTarget(target);
-        PreparedAsset prepared = _host.Prepare(task.AssetPath!, task.AssetSha256, doc);
+        trace.Record("target", $"document={doc.RuntimeSerialNumber}; units={doc.ModelUnitSystem}; layer={doc.Layers.CurrentLayerIndex}; fileLockOwned={doc.IsLocked}");
+        PreparedAsset prepared = _host.Prepare(task.AssetPath!, task.AssetSha256, doc, trace);
         try
         {
             // Native preflight may pump host events. Recheck intent and target before the actual mutation.
             if (stillAllowed is not null && !stillAllowed()) return new TaskPlacementResult("Deferred", "自动放置已暂停；重新显示面板可继续。");
             doc = ResolveTarget(target);
             if (doc.IsCommandRunning || doc.UndoRecordingIsActive) return new TaskPlacementResult("Deferred", "Rhino 正在执行命令；结束后可继续放入模型。");
-            ImportReceipt receipt = _host.Commit(prepared, target.Placement, TaskPlacementPolicy.ImportId(task.OperationId), task.OperationId);
+            ImportReceipt receipt = _host.Commit(prepared, target.Placement, TaskPlacementPolicy.ImportId(task.OperationId), task.OperationId, trace);
             if (receipt.State != "Imported") return new TaskPlacementResult(receipt.State, "此任务之前已被撤销或删除，未重复插入；可用 Redo 或候选方式恢复。", receipt.ObjectId);
             string zoom = ZoomToObject(doc, receipt.ObjectId);
-            return new TaskPlacementResult("Placed", "模型已放入当前文档并创建独立 Block；一次 Undo 可撤销。" + zoom, receipt.ObjectId);
+            trace.Record("view", zoom.Length == 0 ? "zoomed-to-block" : zoom);
+            string repairs = prepared.Audit.RemovedDegenerateFaces > 0 || prepared.Audit.RecomputedNormalMeshes > 0
+                ? $" 已移除 {prepared.Audit.RemovedDegenerateFaces} 个退化面，并为 {prepared.Audit.RecomputedNormalMeshes} 个网格重算法线；原 GLB 保留。" : string.Empty;
+            return new TaskPlacementResult("Placed", "模型已放入当前文档并创建独立 Block；一次 Undo 可撤销。" + repairs + zoom, receipt.ObjectId);
         }
         finally
         {
@@ -153,6 +188,8 @@ internal sealed class TaskPlacementService
             var view = doc.Views.ActiveView;
             RhinoObject? item = doc.Objects.FindId(objectId);
             if (view is null || item is null) return " 视图未自动定位，可选中该 Block 后执行 ZoomSelected。";
+            if (item.IsHidden || !doc.Layers[item.Attributes.LayerIndex].IsVisible)
+                return " Block 已存在，但对象或所属图层已隐藏；请显示该对象/图层后再定位。";
             BoundingBox bounds = BoundingBox.Empty;
             foreach (var (mesh, transform, _) in Lux3DHostService.Meshes(new[] { item }, Transform.Identity))
                 bounds.Union(mesh.GetBoundingBox(transform));

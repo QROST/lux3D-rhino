@@ -171,7 +171,7 @@ public sealed class Lux3DPanel : Panel, IPanel
         foreach (Button button in _networkButtons) button.Enabled = false;
         _status.Text = "正在处理…";
         try { await action(); Ui(() => { if (!_disposed && _status.Text == "正在处理…") _status.Text = "已更新。"; }); }
-        catch (Exception ex) { Ui(() => { if (!_disposed) _status.Text = ex.Message; }); }
+        catch (Exception ex) { Ui(() => { if (!_disposed) _status.Text = ex.Message; global::Rhino.RhinoApp.WriteLine("Lux3D：" + ex.Message); }); }
         finally
         {
             Ui(() =>
@@ -282,7 +282,7 @@ public sealed class Lux3DPanel : Panel, IPanel
         {
             throw new InvalidOperationException(TaskPlacementPolicy.ErrorMessage(ex), ex);
         }
-        Ui(() => { if (!_disposed) _status.Text = result.Message; });
+        Ui(() => { if (!_disposed) _status.Text = result.Message; global::Rhino.RhinoApp.WriteLine("Lux3D：" + result.Message); });
         // History refresh is independent of the completed document mutation.
         try { await ReloadAsync(task.OperationId); }
         catch { Ui(() => { if (!_disposed) _status.Text = result.Message + " 任务列表暂未刷新，可稍后重新查询。"; }); }
@@ -304,7 +304,9 @@ public sealed class Lux3DPanel : Panel, IPanel
             Ui(() =>
             {
                 _autoPlacements.Remove(operationId);
-                if (!_disposed) _status.Text = TaskPlacementPolicy.ErrorMessage(ex) + " 请从任务页点击“放入当前文档”重试原任务。";
+                string message = TaskPlacementPolicy.ErrorMessage(ex) + " 请从任务页点击“放入当前文档”重试原任务。";
+                if (!_disposed) _status.Text = message;
+                global::Rhino.RhinoApp.WriteLine("Lux3D：" + message);
             });
         }
     }
@@ -340,6 +342,7 @@ public sealed class Lux3DPanel : Panel, IPanel
             {
                 if (result.State != "Deferred") _autoPlacements.Remove(task.OperationId);
                 if (!_disposed) _status.Text = result.Message;
+                if (result.State != "Deferred") global::Rhino.RhinoApp.WriteLine("Lux3D：" + result.Message);
             });
         }
         catch (Exception ex)
@@ -347,7 +350,9 @@ public sealed class Lux3DPanel : Panel, IPanel
             Ui(() =>
             {
                 _autoPlacements.Remove(task.OperationId);
-                if (!_disposed) _status.Text = TaskPlacementPolicy.ErrorMessage(ex) + " 请从任务页点击“放入当前文档”。";
+                string message = TaskPlacementPolicy.ErrorMessage(ex) + " 请从任务页点击“放入当前文档”。";
+                if (!_disposed) _status.Text = message;
+                global::Rhino.RhinoApp.WriteLine("Lux3D：" + message);
             });
         }
     }

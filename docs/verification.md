@@ -77,3 +77,13 @@ Shell 脚本通过 `bash -n`，Python 脚本通过 AST 语法解析，差异通�
 - 演示文件 `artifacts/demo/longmen-buddha.glb` 与任务缓存哈希一致；证据为 `artifacts/glb-diagnostic/validation-fixed.json`、`artifacts/glb-diagnostic/recovery-installed.json` 和 `artifacts/install-verification-mac.json`。这些本地文件不包含 API Key、token 或签名下载 URL，也不提交生成资产到 Git。
 
 最终已安装包为 `artifacts/package-mac.22HYbo/lux3d-rhino-0.1.2-rh8_32-mac.yak`，SHA-256 `7412fb904a2f71c862669c67f053e05da3f459eea79cdd0410270d266256ea40`。包内文档保留构建时状态，此段为安装后的补录。用户需保存当前文档并重启 Rhino 后执行上述演示命令；尚未声称模型已显示在 Rhino 中。
+
+## 0.1.3 原生网格兼容性与导入诊断
+
+用户反馈 0.1.2 点击“放入当前文档”后加载但未显示。当次插件未保存阶段日志，因此目前不能认定唯一失败阶段；已向用户索取面板/命令历史提示。本地原任务仍为 Ready，缓存 SHA-256 未变。
+
+实际 GLB 逐项检查：272,630 顶点、283,986 三角面，无非有限坐标或越界索引；有 **5 个重合坐标退化面**与 **39 个零长度法线**。使用官方 `rhino3dm 8.35.0` 在隔离环境重建同一网格，未启动 Rhino：几何校验报 `m_F[35599] has degenerate double precision vertex locations`，附上原法线后报 `m_N[1072] is not a unit vector (length = 0)`。对副本执行 `CullDegenerateFaces` 删除 5 面，再 `ComputeNormals` 后有效性通过；保留 272,630 顶点、283,981 面。证据 `artifacts/glb-diagnostic/rhino3dm-validity.json`。这是确定的网格兼容性缺陷；尚不能证明 Rhino 原生 GLB importer 在用户此次操作中是否先自行修复或直接拒绝。
+
+另已核实两个独立实现错误：`RhinoDoc.IsLocked` 表示本实例持有文件写锁，不能作为不可写判据；默认 `ObjectAttributes.LayerIndex` 为 0，不能代替当前可见图层。0.1.3 修正写锁检查并明确模型空间、当前图层；活动布局纸面需切换模型视口再放置。原生预检、网格修复、正式导入、Block 和视图阶段记录到本地 JSON，错误同时写入命令历史，避免只显示短暂底部状态。
+
+本轮继续只自动构建与安装，不控制 Rhino 界面、不创建生成任务。原生 Import、最终显示、完整材质及 Windows 实机仍保留为待验证项；后续构建/安装证据另行补录。

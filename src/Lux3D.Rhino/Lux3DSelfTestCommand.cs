@@ -56,6 +56,7 @@ public static class Lux3DSelfTest
         Directory.CreateDirectory(directory);
         List<Check> checks = new();
         List<object> evidence = new();
+        CheckValue(checks, "mesh-repair-copy-preserves-source-uv-colors", VerifyMeshRepair);
         using var host = new Lux3DHostService(directory);
         foreach (global::Rhino.UnitSystem units in new[] { global::Rhino.UnitSystem.Meters, global::Rhino.UnitSystem.Millimeters })
         {
@@ -182,6 +183,34 @@ public static class Lux3DSelfTest
     }
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     private static double[] Coordinates(Point3d p) => new[] { p.X, p.Y, p.Z };
+    private static object VerifyMeshRepair()
+    {
+        using var source = new Mesh();
+        foreach (Point3d point in new[] { Point3d.Origin, new Point3d(1, 0, 0), new Point3d(0, 1, 0), Point3d.Origin, new Point3d(1, -1, 0) })
+            source.Vertices.Add(point);
+        source.Faces.AddFace(0, 1, 2);
+        source.Faces.AddFace(3, 4, 1);
+        source.Faces.AddFace(0, 3, 1); // Different indices, coincident positions: a collapsed triangle.
+        for (int i = 0; i < source.Vertices.Count; i++)
+        {
+            source.Normals.Add(0, 0, 0);
+            source.TextureCoordinates.Add(i / 4f, i / 8f);
+            source.VertexColors.Add(System.Drawing.Color.FromArgb(255, 10 + i, 20 + i, 30 + i));
+        }
+        Require(!source.IsValid, "修复夹具必须包含无效法向及退化面。");
+        using Mesh repaired = Lux3DHostService.RepairMeshCopy(source, out int removed);
+        Require(removed == 1 && repaired.Faces.Count == 2 && repaired.IsValid, "有限修复没有得到有效的两个原有三角面。");
+        Require(source.Faces.Count == 3 && !source.IsValid, "修复修改了原始网格。");
+        for (int i = 0; i < source.Vertices.Count; i++)
+        {
+            Require(source.Vertices[i].Equals(repaired.Vertices[i]), "修复改变了顶点位置。");
+            Require(source.TextureCoordinates[i].Equals(repaired.TextureCoordinates[i]), "修复改变了 UV。");
+            Require(source.VertexColors[i].Equals(repaired.VertexColors[i]), "修复改变了顶点颜色。");
+        }
+        using Mesh unchanged = Lux3DHostService.RepairMeshCopy(repaired, out int validRemoved);
+        Require(validRemoved == 0 && unchanged.DataCRC(0) == repaired.DataCRC(0), "有效网格不应重新计算或简化。");
+        return new { removedDegenerateFaces = removed, vertices = repaired.Vertices.Count, triangles = repaired.Faces.Count, preservedSource = true, preservedUvAndColors = true };
+    }
     private static object VerifyPlacement(PreparedAsset asset, PlacementIntent placement, double tolerance)
     {
         BoundingBox b = asset.Audit.Bounds;

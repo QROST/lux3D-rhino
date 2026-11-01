@@ -21,7 +21,7 @@ public sealed class Lux3DPlugin : PlugIn
         Placement = new TaskPlacementService(Host, Client);
         global::Rhino.UI.Panels.RegisterPanel(this, typeof(Lux3DPanel), "Lux3D", null!, global::Rhino.UI.PanelType.PerDoc);
         global::Rhino.RhinoDoc.CloseDocument += OnCloseDocument;
-        global::Rhino.RhinoApp.WriteLine("Lux3D 已加载。输入 Lux3DPanel 打开面板。");
+        global::Rhino.RhinoApp.WriteLine("Lux3D " + Assembly.GetExecutingAssembly().GetName().Version + " 已加载。输入 Lux3DPanel 打开面板。");
         return LoadReturnCode.Success;
     }
     private void OnCloseDocument(object? sender, global::Rhino.DocumentEventArgs e) => Host.Forget(e.DocumentSerialNumber);
