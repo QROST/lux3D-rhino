@@ -113,3 +113,15 @@ Shell 脚本通过 `bash -n`，Python 脚本通过 AST 语法解析，差异通�
 新增宿主自测覆盖 20 次预览参数变换的缓存身份、源网格 CRC、包围盒/矩阵、首次校验及 Clear/Dispose；本轮仅编译，未运行 Rhino。没有使用 Computer Use，也没有新增付费任务。原生导入仍可能短暂阻塞界面，尚未测得可对外宣称的性能倍数。
 
 作者元数据参考 Tripo 的 `QROST / Zhongding Cui (addincui)`；公司品牌依据 [QROST 公开简介](https://github.com/QROST)采用 **CuriousArc**，不添加未经核实的法律实体后缀，保留 NOTICE 中原始版权归属。公开发行按 **macOS / Rhino 8.32+ 预览版**准备，包名 `lux3d-rhino`、版本 `0.1.4-beta.1`；Windows 代码和构建入口保留待实机验收，不发布 `any` 包。最终包与上传结果在完成后另行记录；这段不代表已上传。
+
+## 2026-11-01 Yak 发布与本机安装
+
+`lux3d-rhino 0.1.4-beta.1` 已发布到官方 Yak 服务器，发行标签为 `rh8_32-mac`，`prerelease: true`。作者为 **CuriousArc** 和 **QROST / Zhongding Cui (addincui)**。可在 macOS Rhino 的 `PackageManager` 中启用预览版后搜索安装；本机已完成安装，保存文档并重启 Rhino 后加载新版本。
+
+- 二进制来源：功能提交 `91d4dd7`，发布元数据提交 `454e05d4c8808da3f9dca8299861a0745ab486bd`；打包时工作树干净。最终打包流程再次通过 Release 构建（0 warning / 0 error）、**141/141** 离线测试和夹具再生检查。
+- 包名：`lux3d-rhino-0.1.4-beta.1-rh8_32-mac.yak`，大小 **332,695 字节**，SHA-256 **`e89d6e7cd704c997519526dcf1b1a4d5256ac198c4211c1b101f18e57e1c6d4f`**。
+- 官方 Yak 安装成功，**26/26** 文件与包内内容逐一匹配。安装目录为 `~/Library/Application Support/McNeel/Rhinoceros/packages/8.0/lux3d-rhino/0.1.4-beta.1`；证据为 `artifacts/install-verification-mac.json`。
+- 上传命令在会话中断前已发出，其退出状态未保留。恢复后独立查询[公开版本接口](https://yak.rhino3d.com/versions/lux3d-rhino)，确认版本、作者、预览标记和 macOS 分发文件；官方客户端 `yak search --all --prerelease lux3d-rhino` 返回 `lux3d-rhino (0.1.4-beta.1)`，未重复上传。
+- 从服务器提供的[公开下载地址](https://files.mcneel.com/yak/packages/lux3d-rhino-0.1.4-beta.1-rh8_32-mac.yak)重新下载，SHA-256 与上述本地包完全一致。版本响应与下载证据保存在 `artifacts/yak-publication/`。
+
+本段为发布后补录，不改变已上传归档；包内文档保留构建时的发布候选状态。安装及公开下载校验不替代 Rhino 新版 UI、完整 PBR、Undo/Redo 或 Windows 的宿主验收；本轮未自动控制 Rhino，也未新增付费生成任务。
