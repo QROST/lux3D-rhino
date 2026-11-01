@@ -1,13 +1,23 @@
 name: lux3d-rhino
-version: 0.1.3
+version: 0.1.4-beta.1
 authors:
-  - QROST
-description: >
-  Lux3D for Rhino preview. Manycore OAuth login, regional API-key generation,
-  local GLB candidates and placement. macOS and Windows candidates; real account and host
-  acceptance are recorded separately.
+  - CuriousArc
+  - QROST / Zhongding Cui (addincui)
+description: >-
+  Lux3D for Rhino by CuriousArc is an independent community integration for
+  text-to-3D and single-image-to-3D generation, GLB candidate previews, and
+  native Block placement. Requires Rhino 8.32+, .NET 8 Runtime, and your own
+  regional Aholo API Key. Manycore OAuth sign-in is optional and does not
+  replace the API Key. This macOS beta includes clearer placement feedback
+  and cached preview transforms. Full PBR, Undo/Redo, and Windows host
+  acceptance remain pending. Not an official Manycore, Aholo, or McNeel product.
+url: https://github.com/QROST/lux3D-rhino
 keywords:
   - B8B147EC-5732-4FB9-BA40-C5BB8D36C2AB
   - lux3d
   - aholo
   - manycore
+  - text-to-3d
+  - image-to-3d
+  - glb
+  - curiousarc

@@ -4,7 +4,11 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
-    <Version>0.1.3</Version>
+    <Version>0.1.4-beta.1</Version>
+    <Company>CuriousArc</Company>
+    <Authors>CuriousArc;QROST / Zhongding Cui (addincui)</Authors>
+    <Product>Lux3D for Rhino</Product>
+    <PackageProjectUrl>https://github.com/QROST/lux3D-rhino</PackageProjectUrl>
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>

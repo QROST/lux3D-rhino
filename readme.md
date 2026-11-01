@@ -2,11 +2,20 @@
 
 English | [简体中文](readme.zh-CN.md)
 
-A development candidate for Rhino 8 on macOS and Windows: Manycore OAuth sign-in, Lux3D text/single-image generation, persistent asset caching, local GLB candidate previews, placement by reference height/plane/rotation, and independent Block insertion. The current source version is **0.1.3**. It removes plugin-defined geometry count limits and adds import repair and diagnostics for degenerate mesh faces and invalid normals. Cross-platform implementation is present; Windows acceptance testing remains pending.
+An independent Rhino integration by **CuriousArc · QROST / Zhongding Cui (addincui)**, not an official Manycore, Aholo, or McNeel product. Features include Manycore OAuth sign-in, Lux3D text/single-image generation, persistent asset caching, GLB candidate previews, and independent Block placement. The current version is **0.1.4-beta.1**. This Yak distribution targets **macOS / Rhino 8.32+**. Windows implementation and build scripts are present; host acceptance and a public Windows distribution remain pending.
 
 **Generating models in this version requires an API Key for the selected region. Signing in with Manycore OAuth does not remove that requirement. You can also skip OAuth sign-in in the plugin and configure an API Key directly.**
 
-See [verification records](docs/verification.md) for the current status. The user has reported successful OAuth sign-in, API Key setup, and real model generation in Rhino on macOS. Display after the import fix, full materials, and Undo still require host acceptance. Successful builds and matching installed files do not establish those results.
+See [verification records](docs/verification.md) for the current status. The user has confirmed OAuth sign-in, API Key generation, and successful placement/display of the Buddha model with version 0.1.3 on macOS. The new 0.1.4-beta.1 UI and preview interactions, full PBR, Undo/Redo, save/reopen behavior, and Windows host acceptance still require focused verification. Success with an earlier version does not establish acceptance of new changes.
+
+## This preview release
+
+- Set height, position, and rotation directly on the Generate tab, with visible API Key status. Remove individual candidates without clearing the group.
+- Placement reports actual stages and elapsed time. Task results and errors remain available during the panel session; automatic queries do not overwrite unresolved import errors.
+- Size and angle changes reuse the current candidate's meshes and materials, with rapid input changes coalesced. There are no new geometry count limits or automatic decimation.
+- Direct placement reads, validates, and snapshots files in the background. Native Rhino preflight and final import still run on the UI thread and may briefly block interaction. Diagnostics include monotonic stage timings; no measured speedup factor is claimed yet.
+
+The Yak package name is `lux3d-rhino`, version `0.1.4-beta.1`. In Rhino for macOS, run `PackageManager`, enable prerelease versions, and select this version. Save your documents and restart Rhino after installation. The .NET 8 Runtime and a regional API Key are still required. You can also build a local candidate from source using the steps below; consult the [verification records](docs/verification.md) and Yak server for upload status.
 
 ## OAuth sign-in and generation authorization
 
@@ -40,7 +49,7 @@ Requirements: Rhino **8.32 or newer**, the .NET 8 SDK for builds, the .NET 8 Run
 
 | Platform | Implementation scope | Current acceptance status |
 | --- | --- | --- |
-| macOS, Apple Silicon / Intel | Keychain, system-browser OAuth, Mac Yak build/install scripts | Real generation tested by the user on Apple Silicon; repaired import still awaits user acceptance; Intel unverified |
+| macOS, Apple Silicon / Intel | Keychain, system-browser OAuth, Mac Yak build/install scripts | User confirmed real generation and display with 0.1.3 on Apple Silicon; new interactions and Intel unverified |
 | Windows x64 | Current-user DPAPI credential encryption, system-browser OAuth, PowerShell Yak build/install scripts | Implementation adapted; Windows builds, installation, and host testing pending |
 
 These commands build and install the current source. After installation, save your documents and restart Rhino to load the new version.
