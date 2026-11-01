@@ -12,11 +12,13 @@ public sealed class Lux3DPlugin : PlugIn
     internal static Lux3DPlugin Instance { get; private set; } = null!;
     internal Lux3DHostService Host { get; } = new();
     internal Lux3DClient Client { get; private set; } = null!;
+    internal TaskPlacementService Placement { get; private set; } = null!;
     protected override LoadReturnCode OnLoad(ref string errorMessage)
     {
         Instance = this;
         string directory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
         Client = new Lux3DClient(Path.Combine(directory, "sidecar"));
+        Placement = new TaskPlacementService(Host, Client);
         global::Rhino.UI.Panels.RegisterPanel(this, typeof(Lux3DPanel), "Lux3D", null!, global::Rhino.UI.PanelType.PerDoc);
         global::Rhino.RhinoDoc.CloseDocument += OnCloseDocument;
         global::Rhino.RhinoApp.WriteLine("Lux3D 已加载。输入 Lux3DPanel 打开面板。");

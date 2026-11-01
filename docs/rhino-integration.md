@@ -7,7 +7,7 @@
 - Rhino 8.32 或更新版本，macOS / Windows x64，`net7.0`；编译引用 `RhinoCommon 8.32.26160.13001`，宿主提供 RhinoCommon/Eto，不随插件分发它们。Windows 要求 NETCore 模式，旧 NETFramework 模式无法加载本程序集；参见 [官方运行时说明](https://www.rhino3d.com/docs/guides/netcore/)。
 - 插件/assembly GUID：`B8B147EC-5732-4FB9-BA40-C5BB8D36C2AB`。
 - 面板 GUID：`AC141E4E-8B0E-4A82-A34A-F2B0783201FB`。
-- 主命令：`Lux3DPanel`；离线自测命令：`Lux3DSelfTest`。
+- 主命令：`Lux3DPanel`；直接放置命令：`Lux3DPlaceTask <操作 GUID>`；离线自测命令：`Lux3DSelfTest`。
 - Sidecar 位于 `.rhp` 同目录的 `sidecar/`；界面调用 `Lux3D.Core.Lux3DClient` 私有子进程协议，独立于 Tripo 的配置、身份和通信。
 - Native GLB 预检及 Block 包装流程参考 `QROST/tripo-rhino`，源许可证为 Apache-2.0，见仓库 `NOTICE`。没有复用 Tripo 的 GUID、凭证或任务库。
 
@@ -23,7 +23,11 @@ dotnet build src/Lux3D.Rhino/Lux3D.Rhino.csproj
 
 生成页支持文字、单张 PNG/JPEG、模型、10,000–300,000 目标面数和材质意图。图片在本机执行有界头检查、Eto Bitmap 解码和像素访问；文字/图片选择及参数编辑不会提交生成。唯一创建入口为“生成（将消耗服务额度）”。UI 请求锁防双击；每次提交前向后台检查完整持久历史（含 Submitting/SubmissionUnknown），存在未知记录时明确提示新请求可能重复收费。确认随请求发送，后台在写入前再次核对。
 
-任务历史每页 30 条，支持上一页/下一页；新生成回到第一页，查询保持当前页。任务页查询选中任务；面板可见时最多每 5 秒查询一次在途任务。停止等待、隐藏或关闭面板停止轮询，不代表取消提供方任务。后台结果只进入本地缓存，不自动插入活动文档。
+任务历史每页 30 条，支持上一页/下一页；新生成回到第一页，查询保持当前页。任务页查询选中任务；面板可见时最多每 5 秒查询一次在途任务。停止等待、隐藏或关闭面板停止轮询，不代表取消提供方任务。
+
+0.1.2 新增默认勾选的“生成完成后放入当前文档”：在生成点击时冻结目标文档会话、单位、放置参数；即使切换历史选择，也轮询有自动放置意图的任务。结果 Ready 后在 UI 线程重新检查原文档仍活动、可写且无正在执行的命令，然后导入并缩放到 Block。隐藏面板暂停，关闭面板取消自动意图；目标状态改变则保留任务并提示手动放入。
+
+“放入当前文档”按钮和 `Lux3DPlaceTask <操作 GUID>` 使用同一服务：读取本地任务，必要时查询并下载原 task ID，绝不创建新生成。命令返回后在 Rhino Idle 启动异步工作，再回 UI 线程提交；不复用命令自己的 Undo record。同一任务在该文档使用稳定 import ID，重复调用只定位已有对象；已有 Undo/删除回执则不重新插入。保存重开后可按对象标记找回仍存在的实例。
 
 Ready 任务或手动选取的本地 GLB 可加入最多三个候选。它们共用点、完整 CPlane 基、参考高度和旋转角。拾取点要求先激活绑定的目标文档；点的默认值为世界原点，高度采用文档单位。候选通过 DisplayConduit 显示，切换不会增加对象或 Undo 记录，也不会调用生成接口。预览只用于形体和基础颜色比较，不代表完整 Rendered/PBR 视觉。
 
@@ -31,7 +35,7 @@ Ready 任务或手动选取的本地 GLB 可加入最多三个候选。它们共
 
 ## 坐标、材料与回滚
 
-GLB 在独立 headless RhinoDoc 中由 Rhino 原生 importer 解码。准备阶段校验 GLB、64 MiB、250,000 顶点、500,000 三角形预算，保存固定哈希快照；接受前再验证内容与目标文档会话/单位。Mesh 层次深度上限为 32，实例展开计数也有预算。
+GLB 在独立 headless RhinoDoc 中由 Rhino 原生 importer 解码。Core 与 Host 均不设顶点、三角面、网格数、GLB 体积、节点深度或贴图像素总量的业务门槛；格式解析按实际字节范围、索引和引用关系检查，实例展开使用显式栈和循环检测。准备阶段保存固定哈希快照；接受前再验证内容与目标文档会话/单位，实际 Rhino 导入失败和资源不足分别报告。生成端面数参数约束属于 Lux3D API，不作为 Rhino 的导入上限。当前实现仍受 .NET 字节数组及 Rhino 原生数据类型、机器内存约束；移除业务门槛不等于无限容量。参见 [Rhino 8 网格改进说明](https://docs.mcneel.com/rhino/8mac/help/en-us/commandlist/newinrhino8.htm)。
 
 方向和单位转换交给原生 importer 一次完成。放置层使用已导入的坐标与单位，取包围盒底部中心作锚点，使用 `P + [U V N] × Rz(angle) × H/h × (p-anchor)`。自测会断言原生 importer 是否符合夹具预期；在实际 Rhino 未通过前，不能宣称方向与尺度已验收。
 

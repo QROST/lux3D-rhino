@@ -29,7 +29,7 @@ public sealed record PlacementIntent(Plane Plane, Point3d Point, double Height, 
 }
 
 public sealed record ImportReceipt(Guid ImportId, Guid ObjectId, string DocumentSessionId, string AssetSha256, string State);
-public sealed record AssetAudit(int Meshes, int Vertices, int Triangles, int Materials, int Textures, BoundingBox Bounds);
+public sealed record AssetAudit(long Meshes, long Vertices, long Triangles, int Materials, int Textures, BoundingBox Bounds);
 
 public sealed class PreparedAsset : IDisposable
 {
@@ -46,7 +46,10 @@ public sealed class PreparedAsset : IDisposable
     internal RhinoDoc Staging { get; }
     internal void Verify()
     {
-        if (!File.Exists(SnapshotPath) || !string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(SnapshotPath))), Sha256, StringComparison.OrdinalIgnoreCase))
+        if (!File.Exists(SnapshotPath))
+            throw new InvalidOperationException("预览资产已丢失或发生变化，请重新加载。");
+        using var stream = File.OpenRead(SnapshotPath);
+        if (!string.Equals(Convert.ToHexString(SHA256.HashData(stream)), Sha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("预览资产已丢失或发生变化，请重新加载。");
     }
     public void Dispose()
@@ -99,7 +102,6 @@ public sealed class Lux3DHostService : IDisposable
     {
         RequireUiThread();
         if (!File.Exists(path)) throw new FileNotFoundException("本地 GLB 不存在。", path);
-        if (new FileInfo(path).Length > 64 * 1024 * 1024) throw new InvalidOperationException("GLB 超出 64 MiB 上限。");
         byte[] bytes = File.ReadAllBytes(path);
         GlbContainerValidator.Validate(bytes);
         string sha = Convert.ToHexString(SHA256.HashData(bytes));
@@ -126,6 +128,20 @@ public sealed class Lux3DHostService : IDisposable
             throw;
         }
     }
+    internal ImportReceipt? FindReceipt(RhinoDoc doc, Guid importId)
+    {
+        RequireUiThread();
+        if (_receipts.ContainsKey((doc.RuntimeSerialNumber, importId))) return InspectReceipt(doc, importId);
+        RhinoObject[] matches = Objects(doc).Where(o => o.Attributes.GetUserString("Lux3D.ImportId") == importId.ToString("D")).ToArray();
+        if (matches.Length == 0) return null;
+        if (matches.Length != 1 || matches[0] is not InstanceObject)
+            throw new InvalidOperationException("文档内存在重复或无效的任务导入标记，请先核对已有对象。");
+        string? sha = matches[0].Attributes.GetUserString("Lux3D.AssetSha256");
+        if (string.IsNullOrWhiteSpace(sha)) throw new InvalidOperationException("文档已有导入对象，但资产校验标记缺失；未重复插入。");
+        var receipt = new ImportReceipt(importId, matches[0].Id, Session(doc), sha, "Imported");
+        _receipts[(doc.RuntimeSerialNumber, importId)] = receipt;
+        return receipt;
+    }
     public ImportReceipt InspectReceipt(RhinoDoc doc, Guid importId)
     {
         if (!_receipts.TryGetValue((doc.RuntimeSerialNumber, importId), out ImportReceipt? receipt))
@@ -136,7 +152,7 @@ public sealed class Lux3DHostService : IDisposable
             ? "Imported" : missing;
         return receipt with { State = state };
     }
-    public ImportReceipt Commit(PreparedAsset asset, PlacementIntent placement, Guid importId)
+    public ImportReceipt Commit(PreparedAsset asset, PlacementIntent placement, Guid importId, Guid? generationOperationId = null)
     {
         RequireUiThread();
         if (importId == Guid.Empty) throw new ArgumentException("导入编号不能为空。", nameof(importId));
@@ -193,6 +209,7 @@ public sealed class Lux3DHostService : IDisposable
             instanceAttributes.SetUserString("Lux3D.ImportId", importId.ToString("D"));
             instanceAttributes.SetUserString("Lux3D.AssetSha256", asset.Sha256);
             instanceAttributes.SetUserString("Lux3D.DocumentSession", asset.DocumentSessionId);
+            if (generationOperationId.HasValue) instanceAttributes.SetUserString("Lux3D.GenerationOperationId", generationOperationId.Value.ToString("D"));
             instanceId = doc.Objects.AddInstanceObject(definitionIndex, transform, instanceAttributes);
             if (instanceId == Guid.Empty) throw new InvalidOperationException("放置 Lux3D Block 失败。");
             if (doc.Objects.Delete(added.Select(o => o.Id), true) != added.Length) throw new InvalidOperationException("无法移除本次导入的临时顶层对象。");
@@ -220,7 +237,8 @@ public sealed class Lux3DHostService : IDisposable
         if (!undoEnded) throw new InvalidOperationException("导入对象已建立，但无法确认撤销记录；请检查文档，不要重复导入。");
         ImportReceipt receipt = new(importId, instanceId, asset.DocumentSessionId, asset.Sha256, "Imported");
         _receipts.Add((doc.RuntimeSerialNumber, importId), receipt);
-        doc.Views.Redraw();
+        try { doc.Views.Redraw(); }
+        catch { /* View refresh cannot turn a completed document import into a failed import. */ }
         return receipt;
     }
     private string PersistImportSnapshot(PreparedAsset asset)
@@ -248,8 +266,8 @@ public sealed class Lux3DHostService : IDisposable
     }
     private static void VerifyHash(string path, string expected)
     {
-        if (new FileInfo(path).Length > 64 * 1024 * 1024 ||
-            !string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))), expected, StringComparison.OrdinalIgnoreCase))
+        using var stream = File.OpenRead(path);
+        if (!string.Equals(Convert.ToHexString(SHA256.HashData(stream)), expected, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("持久导入资产校验失败；没有修改目标文档。");
     }
     private static string DocumentState(RhinoDoc doc)
@@ -273,31 +291,51 @@ public sealed class Lux3DHostService : IDisposable
         ActiveObjects = true, ReferenceObjects = false, IncludeLights = true, IncludeGrips = true, IncludePhantoms = true,
     }).ToArray();
 
-    internal static IEnumerable<(Mesh Mesh, Transform Transform, RhinoObject Source)> Meshes(IEnumerable<RhinoObject> objects, Transform transform, int depth = 0)
+    internal static IEnumerable<(Mesh Mesh, Transform Transform, RhinoObject Source)> Meshes(IEnumerable<RhinoObject> objects, Transform transform)
     {
-        if (depth > 32) throw new InvalidOperationException("GLB 节点层次超过 32。");
-        foreach (RhinoObject obj in objects)
+        // A definition may appear in multiple instances; only ancestry repetition is a cycle.
+        var ancestry = new HashSet<Guid>();
+        var pending = new Stack<(IEnumerator<RhinoObject> Objects, Transform Transform, Guid? Definition)>();
+        pending.Push((objects.GetEnumerator(), transform, null));
+        try
         {
-            if (obj.Geometry is Mesh mesh) yield return (mesh, transform, obj);
-            else if (obj is InstanceObject instance)
+            while (pending.Count > 0)
             {
-                foreach (var item in Meshes(instance.InstanceDefinition.GetObjects(), transform * instance.InstanceXform, depth + 1)) yield return item;
+                var frame = pending.Peek();
+                if (!frame.Objects.MoveNext())
+                {
+                    frame.Objects.Dispose();
+                    pending.Pop();
+                    if (frame.Definition.HasValue) ancestry.Remove(frame.Definition.Value);
+                    continue;
+                }
+                RhinoObject obj = frame.Objects.Current;
+                if (obj.Geometry is Mesh mesh) yield return (mesh, frame.Transform, obj);
+                else if (obj is InstanceObject instance)
+                {
+                    InstanceDefinition definition = instance.InstanceDefinition ?? throw new InvalidOperationException("GLB Block 引用了不存在的定义。");
+                    if (!ancestry.Add(definition.Id)) throw new InvalidOperationException("GLB Block 存在循环引用。");
+                    Transform combined = frame.Transform * instance.InstanceXform;
+                    if (!combined.IsValid) throw new InvalidOperationException("GLB Block 变换无效。");
+                    pending.Push((((IEnumerable<RhinoObject>)definition.GetObjects()).GetEnumerator(), combined, definition.Id));
+                }
+                else throw new InvalidOperationException("GLB 含不支持的非 Mesh 对象。");
             }
-            else throw new InvalidOperationException("GLB 含不支持的非 Mesh 对象。");
         }
+        finally { while (pending.Count > 0) pending.Pop().Objects.Dispose(); }
     }
     internal static AssetAudit Audit(IEnumerable<RhinoObject> objects)
     {
-        int count = 0, vertices = 0, triangles = 0;
+        long count = 0, vertices = 0, triangles = 0;
         BoundingBox bounds = BoundingBox.Empty;
         HashSet<Guid> materials = new();
         HashSet<string> textures = new(StringComparer.Ordinal);
         foreach (var (mesh, transform, source) in Meshes(objects, Transform.Identity))
         {
-            if (!mesh.IsValid || ++count > 4096) throw new InvalidOperationException("GLB Mesh 无效或对象过多。");
+            if (!mesh.IsValid) throw new InvalidOperationException("GLB Mesh 无效。");
+            count++;
             vertices = checked(vertices + mesh.Vertices.Count);
-            triangles = checked(triangles + mesh.Faces.Sum(f => f.IsQuad ? 2 : 1));
-            if (vertices > 250_000 || triangles > 500_000) throw new InvalidOperationException("GLB 超出 250000 顶点/500000 三角形预算。");
+            triangles = checked(triangles + mesh.Faces.Sum(f => f.IsQuad ? 2L : 1L));
             bounds.Union(mesh.GetBoundingBox(transform));
             Material material = source.GetMaterial(true);
             if (material is not null)

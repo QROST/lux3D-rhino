@@ -17,11 +17,12 @@ public sealed class Lux3DPanel : Panel, IPanel
     private readonly uint _serial;
     private readonly Lux3DClient _client;
     private readonly Lux3DHostService _host;
+    private readonly TaskPlacementService _taskPlacement;
     private readonly CandidatePreview _preview = new();
-    private readonly List<(string Name, PreparedAsset Asset)> _candidates = new();
+    private readonly List<(string Name, PreparedAsset Asset, Guid ImportId)> _candidates = new();
     private readonly List<TaskRecord> _records = new();
     private readonly UITimer _timer = new() { Interval = 5 };
-    private readonly DropDown _region = new() { DataStore = new[] { "国际区 global（待真实调用验收）", "中国区 cn（待真实调用验收）" }, SelectedIndex = 0 };
+    private readonly DropDown _region = new() { DataStore = new[] { "国际区 global", "中国区 cn" }, SelectedIndex = 0 };
     private readonly Label _connection = Status("尚未连接");
     private readonly PasswordBox _apiKey = new();
     private readonly CheckBox _persist = new() { Text = "保存到本机安全存储", Checked = false };
@@ -29,6 +30,7 @@ public sealed class Lux3DPanel : Panel, IPanel
     private readonly TextBox _image = new() { ReadOnly = true, PlaceholderText = "可选：一张 PNG/JPEG 照片" };
     private readonly DropDown _model = new() { DataStore = new[] { "G1-Turbo" }, SelectedIndex = 0 };
     private readonly NumericStepper _faces = new() { MinValue = 10000, MaxValue = 300000, Increment = 5000, DecimalPlaces = 0, Value = 50000 };
+    private readonly CheckBox _autoPlace = new() { Text = "生成完成后放入当前文档", Checked = true, ToolTip = "新任务会使用提交时的文档、位置、高度和角度；原文档必须仍处于活动状态。关闭面板后改为手动放入。" };
     private readonly CheckBox _pbr = new() { Text = "请求 PBR 材质", Checked = true };
     private readonly Button _generate = new() { Text = "生成（将消耗服务额度）" };
     private readonly ListBox _tasks = new() { Height = 130 };
@@ -37,12 +39,13 @@ public sealed class Lux3DPanel : Panel, IPanel
     private readonly NumericStepper _height = new() { MinValue = 0.001, MaxValue = 1e9, DecimalPlaces = 3, Value = 1000 };
     private readonly NumericStepper _rotation = new() { MinValue = -360, MaxValue = 360, DecimalPlaces = 1, Value = 0 };
     private readonly Label _placement = Status("原点 / 世界 XY 平面；高度使用目标文档单位");
-    private readonly Label _status = Status("生成结果先保存在本地；选择候选后显式接受。");
+    private readonly Label _status = Status("默认生成完成后放入当前文档；结果也会保存在本地任务历史。");
     private readonly List<Button> _networkButtons = new();
     private readonly Label _pageLabel = Status("第 1 页，每页 30 条");
     private readonly Button _previousPage;
     private readonly Button _nextPage;
-    private int _page;
+    private readonly Dictionary<Guid, TaskPlacementTarget> _autoPlacements = new();
+    private int _page, _placementEpoch, _autoPollIndex;
     private Plane _plane = Plane.WorldXY;
     private Point3d _point = Point3d.Origin;
     private bool _busy, _disposed, _shown, _paused, _canGenerate;
@@ -51,12 +54,13 @@ public sealed class Lux3DPanel : Panel, IPanel
     {
         _serial = documentSerialNumber;
         _host = Lux3DPlugin.Instance.Host;
+        _taskPlacement = Lux3DPlugin.Instance.Placement;
         _client = Lux3DPlugin.Instance.Client;
         RhinoDoc? doc = RhinoDoc.FromRuntimeSerialNumber(_serial);
         if (doc is not null)
         {
             _host.Session(doc);
-            _height.Value = doc.ModelUnitSystem == global::Rhino.UnitSystem.Meters ? 1 : 1000;
+            _height.Value = Math.Clamp(TaskPlacementService.DefaultPlacement(doc).Height, _height.MinValue, _height.MaxValue);
         }
         Button login = NetworkButton("Manycore OAuth 登录", async () => SetConnection(await _client.LoginAsync(Region())));
         Button refreshConnection = NetworkButton("连接状态", async () => SetConnection(await _client.GetConnectionAsync(Region())));
@@ -74,6 +78,7 @@ public sealed class Lux3DPanel : Panel, IPanel
         _networkButtons.Add(_generate);
         _generate.Enabled = false;
         Button refresh = NetworkButton("查询选中任务", RefreshSelectedAsync);
+        Button place = NetworkButton("放入当前文档", PlaceSelectedTaskAsync);
         Button reload = NetworkButton("读取本地历史", ReloadAsync);
         _previousPage = NetworkButton("上一页", async () => { if (_page > 0) { _page--; await ReloadAsync(null); } });
         _nextPage = NetworkButton("下一页", async () => { if (_records.Count == 30) { _page++; await ReloadAsync(null); } });
@@ -96,6 +101,13 @@ public sealed class Lux3DPanel : Panel, IPanel
         _timer.Elapsed += (_, _) =>
         {
             if (!_shown || _paused || _busy || _disposed) return;
+            if (_autoPlacements.Count > 0)
+            {
+                _autoPollIndex %= _autoPlacements.Count;
+                Guid operationId = _autoPlacements.Keys.ElementAt(_autoPollIndex++);
+                _ = RunAsync(() => RefreshAutoTaskAsync(operationId));
+                return;
+            }
             TaskRecord? record = SelectedTask();
             if (record is not null && record.State is "Queued" or "Running" or "StatusUnknown" or "Succeeded" or "DownloadFailed")
                 _ = RunAsync(RefreshSelectedAsync);
@@ -107,10 +119,11 @@ public sealed class Lux3DPanel : Panel, IPanel
                 new TabPage { Text = "生成", Content = Layout(
                     Status("文字或单张照片；提交后输入会固定到任务记录。"), _prompt,
                     _image, Row(pickImage, clearImage), Row(new Label { Text = "模型" }, _model),
-                    Row(new Label { Text = "目标面数" }, _faces), _pbr, _generate,
+                    Row(new Label { Text = "目标面数" }, _faces), _pbr, _autoPlace,
+                    Status("放置使用“任务 / 候选”页的参考高度和位置；默认高度为 1 米换算到文档单位。"), _generate,
                     Status("未知提交结果不会自动重试；重新生成可能再次消耗额度。")) },
-                new TabPage { Text = "任务 / 候选", Content = Layout(_tasks, Row(_previousPage, _pageLabel, _nextPage), Row(reload, refresh), pause, _details,
-                    add, local, _candidate, Row(new Label { Text = "参考高度" }, _height),
+                new TabPage { Text = "任务 / 候选", Content = Layout(_tasks, Row(_previousPage, _pageLabel, _nextPage), Row(reload, refresh), pause, _details, place,
+                    Status("同一任务再次放入只定位已有 Block；需要新实例时使用候选。"), add, local, _candidate, Row(new Label { Text = "参考高度" }, _height),
                     Row(new Label { Text = "平面内角度 °" }, _rotation), _placement, pick, reset,
                     Status("预览显示几何和基础颜色；完整 PBR 请接受后在 Rendered 模式检查。"), accept, clear) },
                 new TabPage { Text = "连接", Content = Layout(_region, _connection, login,
@@ -157,7 +170,7 @@ public sealed class Lux3DPanel : Panel, IPanel
         _busy = true;
         foreach (Button button in _networkButtons) button.Enabled = false;
         _status.Text = "正在处理…";
-        try { await action(); Ui(() => { if (!_disposed) _status.Text = "已更新。"; }); }
+        try { await action(); Ui(() => { if (!_disposed && _status.Text == "正在处理…") _status.Text = "已更新。"; }); }
         catch (Exception ex) { Ui(() => { if (!_disposed) _status.Text = ex.Message; }); }
         finally
         {
@@ -203,6 +216,8 @@ public sealed class Lux3DPanel : Panel, IPanel
         if (!_canGenerate) throw new InvalidOperationException("此连接尚无已验证的 Lux3D API 权限。请先在连接页配置。");
         if (!string.IsNullOrWhiteSpace(_image.Text)) ValidateImage(_image.Text);
         string region = Region();
+        int placementEpoch = _placementEpoch;
+        TaskPlacementTarget? automaticTarget = _autoPlace.Checked == true ? _taskPlacement.Capture(TargetDocument(), Placement()) : null;
         var input = new GenerationInput(_prompt.Text.Trim(), string.IsNullOrEmpty(_image.Text) ? null : _image.Text,
             "G1-Turbo", (int)_faces.Value, _pbr.Checked == true);
         if (await _client.HasUnknownSubmissionsAsync())
@@ -218,8 +233,16 @@ public sealed class Lux3DPanel : Panel, IPanel
         if (_disposed) return;
         TaskRecord task = await _client.GenerateAsync(region, input);
         if (_disposed) return;
-        Ui(() => _page = 0);
+        Ui(() =>
+        {
+            _page = 0;
+            bool automaticScheduled = automaticTarget is not null && placementEpoch == _placementEpoch;
+            if (automaticTarget is not null && automaticScheduled)
+                _autoPlacements[task.OperationId] = automaticTarget;
+            _status.Text = automaticScheduled ? "任务已提交；完成后将按提交时的位置放入原文档。" : "任务已提交；完成后可从任务页放入当前文档。";
+        });
         await ReloadAsync(task.OperationId);
+        await TryAutoPlaceAsync(task);
     }
     private TaskRecord? SelectedTask() => _tasks.SelectedIndex >= 0 && _tasks.SelectedIndex < _records.Count ? _records[_tasks.SelectedIndex] : null;
     private async Task ReloadAsync() => await ReloadAsync(SelectedTask()?.OperationId);
@@ -239,8 +262,94 @@ public sealed class Lux3DPanel : Panel, IPanel
     private async Task RefreshSelectedAsync()
     {
         TaskRecord record = SelectedTask() ?? throw new InvalidOperationException("请先选择任务。");
-        await _client.RefreshAsync(record.OperationId);
+        TaskRecord refreshed = await _client.RefreshAsync(record.OperationId);
         await ReloadAsync(record.OperationId);
+        await TryAutoPlaceAsync(refreshed);
+    }
+    private async Task PlaceSelectedTaskAsync()
+    {
+        TaskRecord task = SelectedTask() ?? throw new InvalidOperationException("请先选择要放入的任务。");
+        TaskPlacementTarget target = _taskPlacement.Capture(TargetDocument(), Placement());
+        _autoPlacements.Remove(task.OperationId);
+        int epoch = _placementEpoch;
+        TaskPlacementResult result;
+        try
+        {
+            result = await _taskPlacement.PlaceAsync(task.OperationId, target,
+                () => !_disposed && _shown && epoch == _placementEpoch);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(TaskPlacementPolicy.ErrorMessage(ex), ex);
+        }
+        Ui(() => { if (!_disposed) _status.Text = result.Message; });
+        // History refresh is independent of the completed document mutation.
+        try { await ReloadAsync(task.OperationId); }
+        catch { Ui(() => { if (!_disposed) _status.Text = result.Message + " 任务列表暂未刷新，可稍后重新查询。"; }); }
+    }
+    private async Task RefreshAutoTaskAsync(Guid operationId)
+    {
+        try
+        {
+            TaskRecord task = await _client.GetTaskAsync(operationId);
+            if (!TaskPlacementPolicy.HasCachedAsset(task) && TaskPlacementPolicy.CanRefresh(task))
+                task = await _client.RefreshAsync(operationId);
+            Guid? selected = null;
+            Ui(() => selected = SelectedTask()?.OperationId);
+            await ReloadAsync(selected);
+            await TryAutoPlaceAsync(task);
+        }
+        catch (Exception ex)
+        {
+            Ui(() =>
+            {
+                _autoPlacements.Remove(operationId);
+                if (!_disposed) _status.Text = TaskPlacementPolicy.ErrorMessage(ex) + " 请从任务页点击“放入当前文档”重试原任务。";
+            });
+        }
+    }
+    private async Task TryAutoPlaceAsync(TaskRecord task)
+    {
+        TaskPlacementTarget? target = null;
+        int epoch = 0;
+        Ui(() =>
+        {
+            epoch = _placementEpoch;
+            if (!_disposed && _shown) _autoPlacements.TryGetValue(task.OperationId, out target);
+        });
+        if (target is null) return;
+        if (task.State is "Failed" or "ProviderCancelled" or "SubmissionUnknown" or "Rejected" or "Missing" or "DownloadFailed")
+        {
+            Ui(() =>
+            {
+                _autoPlacements.Remove(task.OperationId);
+                if (!_disposed) _status.Text = TaskPlacementPolicy.NotReadyMessage(task) + " 可从任务页手动放入原任务。";
+            });
+            return;
+        }
+        if (task.State != "Ready")
+        {
+            Ui(() => { if (!_disposed) _status.Text = "任务 " + task.OperationId.ToString("N")[..8] + "：" + StateText(task.State) + "，完成后会放入原文档。"; });
+            return;
+        }
+        try
+        {
+            TaskPlacementResult result = await _taskPlacement.PlaceReadyAsync(task, target,
+                () => !_disposed && _shown && !_paused && epoch == _placementEpoch && _autoPlacements.ContainsKey(task.OperationId));
+            Ui(() =>
+            {
+                if (result.State != "Deferred") _autoPlacements.Remove(task.OperationId);
+                if (!_disposed) _status.Text = result.Message;
+            });
+        }
+        catch (Exception ex)
+        {
+            Ui(() =>
+            {
+                _autoPlacements.Remove(task.OperationId);
+                if (!_disposed) _status.Text = TaskPlacementPolicy.ErrorMessage(ex) + " 请从任务页点击“放入当前文档”。";
+            });
+        }
     }
     private void RenderTask()
     {
@@ -249,7 +358,7 @@ public sealed class Lux3DPanel : Panel, IPanel
     }
     private static string StateText(string state) => state switch
     {
-        "Ready" => "可预览", "Queued" => "排队中", "Running" => "生成中", "Succeeded" => "生成成功，待下载",
+        "Ready" => "可放入 / 预览", "Rejected" => "模型已生成，资产校验未通过", "Missing" => "本地模型缓存缺失", "Queued" => "排队中", "Running" => "生成中", "Succeeded" => "生成成功，待下载",
         "Failed" => "失败", "DownloadFailed" => "下载失败，可重试查询", "StatusUnknown" => "状态待核对",
         "SubmissionUnknown" => "提交结果未知", "ProviderCancelled" => "服务端已取消", _ => state,
     };
@@ -269,7 +378,7 @@ public sealed class Lux3DPanel : Panel, IPanel
     {
         if (_candidates.Count >= 3) throw new InvalidOperationException("每组最多 3 个候选；请清空后新建候选组。");
         PreparedAsset asset = _host.Prepare(path, sha, TargetDocument());
-        _candidates.Add((name, asset));
+        _candidates.Add((name, asset, Guid.NewGuid()));
         _candidate.DataStore = _candidates.Select((c, i) => $"{(char)('A' + i)} · {c.Name}").ToArray();
         _candidate.SelectedIndex = _candidates.Count - 1;
         ShowPreview();
@@ -300,9 +409,13 @@ public sealed class Lux3DPanel : Panel, IPanel
     private void AcceptCandidate()
     {
         if (_candidate.SelectedIndex < 0) throw new InvalidOperationException("请先加载并选择候选。");
-        ImportReceipt receipt = _host.Commit(_candidates[_candidate.SelectedIndex].Asset, Placement(), Guid.NewGuid());
-        ClearCandidates();
-        _status.Text = $"已创建独立 Block；一次 Undo 可撤销。对象 {receipt.ObjectId}";
+        ImportReceipt receipt = _host.Commit(_candidates[_candidate.SelectedIndex].Asset, Placement(), _candidates[_candidate.SelectedIndex].ImportId);
+        string cleanup = string.Empty;
+        try { ClearCandidates(); }
+        catch { cleanup = " 预览清理未完成，可点击“退出比较 / 清空候选”；文档导入结果不受影响。"; }
+        _status.Text = receipt.State == "Imported"
+            ? $"已创建独立 Block；一次 Undo 可撤销。对象 {receipt.ObjectId}" + cleanup
+            : "此前接受的候选已被撤销或删除，没有重复插入；可用 Redo 恢复或明确新建候选。" + cleanup;
     }
     private void ClearCandidates()
     {
@@ -316,10 +429,10 @@ public sealed class Lux3DPanel : Panel, IPanel
         _ = RunAsync(async () => { SetConnection(await _client.GetConnectionAsync(Region())); await ReloadAsync(null); });
     }
     public void PanelHidden(uint documentSerialNumber, ShowPanelReason reason) { _shown = false; _timer.Stop(); _preview.Clear(); }
-    public void PanelClosing(uint documentSerialNumber, bool onCloseDocument) { _shown = false; _timer.Stop(); ClearCandidates(); }
+    public void PanelClosing(uint documentSerialNumber, bool onCloseDocument) { _shown = false; _placementEpoch++; _autoPlacements.Clear(); _timer.Stop(); ClearCandidates(); }
     protected override void Dispose(bool disposing)
     {
-        if (disposing && !_disposed) { _disposed = true; _timer.Stop(); _timer.Dispose(); ClearCandidates(); _preview.Dispose(); }
+        if (disposing && !_disposed) { _disposed = true; _placementEpoch++; _autoPlacements.Clear(); _timer.Stop(); _timer.Dispose(); ClearCandidates(); _preview.Dispose(); }
         base.Dispose(disposing);
     }
 }

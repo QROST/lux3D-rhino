@@ -15,7 +15,7 @@ Rhino 插件 GUID `B8B147EC-5732-4FB9-BA40-C5BB8D36C2AB`；面板 GUID `AC141E4E
 
 本版简化为宿主创建的私有子进程 stdin/stdout 管道；双方协议 Version=1 和唯一请求 ID。没有开放本地控制 TCP 端口、全局命名管道或可被其他进程发现的控制令牌。唯一短时 loopback TCP 是 OAuth 回调，先绑定随机 IPv4 loopback 端口再注册并发起授权；用 state + PKCE 保护。所有 IPC 有限长，历史每页最多 30 条。
 
-OAuth/API 密钥留在 sidecar 内存和平台凭证存储：macOS 使用独立 Keychain 服务 `ai.aholo.lux3d.rhino`，Windows 使用当前用户 DPAPI 加密文件及受限目录。唯一例外是用户主动在 Rhino 密码框输入 API Key，随私有管道传入 sidecar 后清空 UI。令牌不传回 Rhino；任务只包含连接指纹。API Key 与 OAuth Bearer 不混用。CDN 下载使用独立无鉴权 HttpClient，禁止代理，DNS 解析后直连公网 IP，逐跳复验 HTTPS，限制 64 MiB。
+OAuth/API 密钥留在 sidecar 内存和平台凭证存储：macOS 使用独立 Keychain 服务 `ai.aholo.lux3d.rhino`，Windows 使用当前用户 DPAPI 加密文件及受限目录。唯一例外是用户主动在 Rhino 密码框输入 API Key，随私有管道传入 sidecar 后清空 UI。令牌不传回 Rhino；任务只包含连接指纹。API Key 与 OAuth Bearer 不混用。CDN 下载使用独立无鉴权 HttpClient，禁止代理，DNS 解析后直连公网 IP，逐跳复验 HTTPS。GLB 不设插件业务体积上限，实际读取受文件格式、.NET 数据表示及机器资源约束；资源失败保留原任务并明确说明，不冒充格式拒绝。
 
 双方管道显式使用无 BOM UTF-8，避免 Windows 控制台代码页改变中文消息。后台由完整路径启动；framework-dependent 包通过 `SidecarRuntime` 在环境配置、系统安装目录和 PATH 中定位包含 .NET 8 的 host。候选路径不包含当前工作目录的隐式搜索。Rhino 侧为跨平台 net7.0 程序集，要求 Rhino 8 的 NETCore 模式；不支持 Windows NETFramework 模式。
 
@@ -29,7 +29,7 @@ OAuth/API 密钥留在 sidecar 内存和平台凭证存储：macOS 使用独立 
 
 方向/单位转换由 Rhino 原生 GLB 导入承担；插件不重复 Y-up 到 Z-up 转换。放置在已转换的中立几何上按底部中心、目标高度、平面完整 X/Y 基、旋转计算。源单位米与毫米/米文档的实际行为由固定非对称夹具断言，未运行宿主测试前不声称通过。
 
-预览使用独立 headless 文档和 DisplayConduit。正式接受重新校验快照哈希、目标文档会话和单位，以单 Undo 记录创建独立 Block。后台任务不自动插入当前活动文档。
+预览使用独立 headless 文档和 DisplayConduit。正式接受重新校验快照哈希、目标文档会话和单位，以单 Undo 记录创建独立 Block。0.1.2 的演示选项允许用户在提交前授权生成后直接放置，目标和变换在提交时固定，导入前重新检查文档会话、单位、活动状态和写入能力；不会因为切换文档而把结果插入另一文档。生成任务的稳定导入标记用于定位已有 Block，撤销/删除后不自动重插。
 
 ## 与 PRD 的关系
 
