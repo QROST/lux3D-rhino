@@ -50,7 +50,7 @@ Lux3DSelfTest "/Users/addincui/Github/lux3D-rhino/fixtures/asymmetric-pbr.glb" "
 
 ## 数据与开发
 
-后台状态位于 .NET `LocalApplicationData/Lux3D-Rhino`；macOS 通常为 `~/.local/share/Lux3D-Rhino`。`tasks/` 不含凭证，`inputs/` 保存提交图片快照，`assets/` 保存 SHA-256 命名的不可变 GLB。没有自动上传遥测或清理缓存。
+后台状态位于 .NET `LocalApplicationData/Lux3D-Rhino`；本机实测为 `~/Library/Application Support/Lux3D-Rhino`。`tasks/` 不含凭证，`inputs/` 保存提交图片快照，`assets/` 保存 SHA-256 命名的不可变 GLB。没有自动上传遥测或清理缓存。
 
 ```bash
 dotnet build Lux3D.Rhino.sln -c Release
