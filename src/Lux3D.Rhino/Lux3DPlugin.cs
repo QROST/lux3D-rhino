@@ -9,6 +9,9 @@ namespace Lux3D.Rhino;
 [Guid("B8B147EC-5732-4FB9-BA40-C5BB8D36C2AB")]
 public sealed class Lux3DPlugin : PlugIn
 {
+    internal static string DisplayVersion => typeof(Lux3DPlugin).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+        ?? typeof(Lux3DPlugin).Assembly.GetName().Version?.ToString() ?? "unknown";
     internal static Lux3DPlugin Instance { get; private set; } = null!;
     internal Lux3DHostService Host { get; } = new();
     internal Lux3DClient Client { get; private set; } = null!;
@@ -21,7 +24,7 @@ public sealed class Lux3DPlugin : PlugIn
         Placement = new TaskPlacementService(Host, Client);
         global::Rhino.UI.Panels.RegisterPanel(this, typeof(Lux3DPanel), "Lux3D", null!, global::Rhino.UI.PanelType.PerDoc);
         global::Rhino.RhinoDoc.CloseDocument += OnCloseDocument;
-        global::Rhino.RhinoApp.WriteLine("Lux3D " + Assembly.GetExecutingAssembly().GetName().Version + " 已加载。输入 Lux3DPanel 打开面板。");
+        global::Rhino.RhinoApp.WriteLine("Lux3D " + DisplayVersion + " 已加载。输入 Lux3DPanel 打开面板。");
         return LoadReturnCode.Success;
     }
     private void OnCloseDocument(object? sender, global::Rhino.DocumentEventArgs e) => Host.Forget(e.DocumentSerialNumber);

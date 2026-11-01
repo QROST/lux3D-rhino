@@ -137,6 +137,32 @@ public sealed class HostImportTraceTests : IDisposable
         return JsonDocument.Parse(stream);
     }
 
+    [Fact]
+    public void ReportsMonotonicStageDurationsAndObserverFailuresCannotBreakPlacement()
+    {
+        var trace = new HostImportTrace(Guid.NewGuid(), 1, "0.1.4", _root);
+        var notifications = new List<(string Stage, TimeSpan Elapsed)>();
+        trace.StageChanged += (_, _) => throw new InvalidOperationException("failed UI observer");
+        trace.StageChanged += (stage, elapsed) => notifications.Add((stage, elapsed));
+        trace.Record("file-ready");
+        trace.Record("native-import");
+        trace.Complete("Placed");
+        Assert.Equal(new[] { "file-ready", "native-import" }, notifications.Select(n => n.Stage));
+        Assert.True(notifications[1].Elapsed >= notifications[0].Elapsed);
+        using JsonDocument report = Read(trace.ReportPath);
+        double previous = 0;
+        foreach (JsonElement item in report.RootElement.GetProperty("events").EnumerateArray())
+        {
+            double elapsed = item.GetProperty("elapsedMilliseconds").GetDouble();
+            double delta = item.GetProperty("sincePreviousEventMilliseconds").GetDouble();
+            Assert.True(elapsed >= previous);
+            Assert.Equal(elapsed - previous, delta, precision: 6);
+            previous = elapsed;
+        }
+        Assert.Equal(previous, report.RootElement.GetProperty("elapsedMilliseconds").GetDouble());
+        Assert.Equal("Placed", report.RootElement.GetProperty("result").GetString());
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);

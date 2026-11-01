@@ -11,6 +11,10 @@ namespace Lux3D.Rhino;
 
 internal sealed record TaskPlacementTarget(uint DocumentSerial, string DocumentSession, global::Rhino.UnitSystem Units, PlacementIntent Placement);
 internal sealed record TaskPlacementResult(string State, string Message, Guid? ObjectId = null);
+internal sealed record TaskPlacementProgress(Guid OperationId, string Stage, string Message, TimeSpan Elapsed)
+{
+    public uint DocumentSerial { get; init; }
+}
 
 internal static class TaskPlacementPolicy
 {
@@ -58,6 +62,7 @@ internal sealed class TaskPlacementService
     private readonly Lux3DHostService _host;
     private readonly Lux3DClient _client;
     private readonly ConcurrentDictionary<(uint, Guid), byte> _inFlight = new();
+    public event Action<TaskPlacementProgress>? ProgressChanged;
     public TaskPlacementService(Lux3DHostService host, Lux3DClient client) { _host = host; _client = client; }
 
     public TaskPlacementTarget Capture(RhinoDoc doc, PlacementIntent placement)
@@ -94,7 +99,7 @@ internal sealed class TaskPlacementService
                 trace.Record("recover-original-task");
                 task = await _client.RefreshAsync(operationId).ConfigureAwait(false);
             }
-            return Finish(trace, await OnUiAsync(() => PlaceOnUiThread(task, target, stillAllowed, trace)).ConfigureAwait(false));
+            return Finish(trace, await PrepareAndPlaceAsync(task, target, stillAllowed, trace).ConfigureAwait(false));
         }
         catch (Exception ex) { RecordFailure(trace, ex); throw; }
         finally { _inFlight.TryRemove(key, out _); }
@@ -104,12 +109,36 @@ internal sealed class TaskPlacementService
         var key = (target.DocumentSerial, task.OperationId);
         if (!_inFlight.TryAdd(key, 0)) return new TaskPlacementResult("Deferred", "此任务正在放入，请等待本次操作完成。");
         var trace = NewTrace(task.OperationId, target);
-        try { return Finish(trace, await OnUiAsync(() => PlaceOnUiThread(task, target, stillAllowed, trace)).ConfigureAwait(false)); }
+        try { return Finish(trace, await PrepareAndPlaceAsync(task, target, stillAllowed, trace).ConfigureAwait(false)); }
         catch (Exception ex) { RecordFailure(trace, ex); throw; }
         finally { _inFlight.TryRemove(key, out _); }
     }
-    private static HostImportTrace NewTrace(Guid operationId, TaskPlacementTarget target) => new(operationId,
-        target.DocumentSerial, typeof(Lux3DPlugin).Assembly.GetName().Version?.ToString() ?? "unknown");
+    private HostImportTrace NewTrace(Guid operationId, TaskPlacementTarget target)
+    {
+        var trace = new HostImportTrace(operationId, target.DocumentSerial, Lux3DPlugin.DisplayVersion);
+        trace.StageChanged += (stage, elapsed) =>
+        {
+            string? message = stage switch
+            {
+                "read-task" => "读取本地任务记录",
+                "recover-original-task" => "查询原任务并恢复下载（不会重新生成）",
+                "preflight_file_start" => "校验模型文件并准备导入快照",
+                "preflight_start" or "preflight_native_import_start" => "Rhino 正在预检模型",
+                "preflight_native_import_result" => "检查并修复预检网格",
+                "commit_start" => "准备正式导入与撤销记录",
+                "commit_native_import_start" => "Rhino 正在导入当前文档",
+                "commit_native_import_result" => "检查导入网格并创建 Block",
+                "commit_block_geometry_ready" => "放置模型并准备定位视图",
+                "view" => "模型已导入，正在完成记录",
+                _ => null,
+            };
+            if (message is null) return;
+            var progress = new TaskPlacementProgress(operationId, stage, message, elapsed) { DocumentSerial = target.DocumentSerial };
+            foreach (Delegate handler in ProgressChanged?.GetInvocationList() ?? Array.Empty<Delegate>())
+                try { ((Action<TaskPlacementProgress>)handler)(progress); } catch { }
+        };
+        return trace;
+    }
     private static TaskPlacementResult Finish(HostImportTrace trace, TaskPlacementResult result)
     {
         trace.Record("result", result.Message);
@@ -151,15 +180,24 @@ internal sealed class TaskPlacementService
         string zoom = ZoomToObject(doc, receipt.ObjectId);
         return new TaskPlacementResult("Existing", "此任务已在当前文档中；没有重复插入。" + (zoom.Length == 0 ? "已定位已有 Block。" : zoom), receipt.ObjectId);
     }
-    private TaskPlacementResult PlaceOnUiThread(TaskRecord task, TaskPlacementTarget target, Func<bool>? stillAllowed, HostImportTrace trace)
+    private async Task<TaskPlacementResult> PrepareAndPlaceAsync(TaskRecord task, TaskPlacementTarget target, Func<bool>? stillAllowed, HostImportTrace trace)
+    {
+        TaskPlacementResult? existing = await OnUiAsync(() => stillAllowed is not null && !stillAllowed()
+            ? new TaskPlacementResult("Deferred", "自动放置已暂停；重新显示面板可继续。") : FindExisting(target, task)).ConfigureAwait(false);
+        if (existing is not null) return existing;
+        if (!TaskPlacementPolicy.HasCachedAsset(task)) throw new InvalidOperationException(TaskPlacementPolicy.NotReadyMessage(task));
+        // Pure file/managed work only: no RhinoDoc, geometry or UI access on this worker.
+        using GlbImportSnapshot snapshot = await Task.Run(() => GlbImportSnapshot.Create(task.AssetPath!, task.AssetSha256, trace)).ConfigureAwait(false);
+        return await OnUiAsync(() => PlaceOnUiThread(task, target, stillAllowed, trace, snapshot)).ConfigureAwait(false);
+    }
+    private TaskPlacementResult PlaceOnUiThread(TaskRecord task, TaskPlacementTarget target, Func<bool>? stillAllowed, HostImportTrace trace, GlbImportSnapshot snapshot)
     {
         if (stillAllowed is not null && !stillAllowed()) return new TaskPlacementResult("Deferred", "自动放置已暂停；重新显示面板可继续。");
         TaskPlacementResult? existing = FindExisting(target, task);
         if (existing is not null) return existing;
-        if (!TaskPlacementPolicy.HasCachedAsset(task)) throw new InvalidOperationException(TaskPlacementPolicy.NotReadyMessage(task));
         RhinoDoc doc = ResolveTarget(target);
         trace.Record("target", $"document={doc.RuntimeSerialNumber}; units={doc.ModelUnitSystem}; layer={doc.Layers.CurrentLayerIndex}; fileLockOwned={doc.IsLocked}");
-        PreparedAsset prepared = _host.Prepare(task.AssetPath!, task.AssetSha256, doc, trace);
+        PreparedAsset prepared = _host.Prepare(snapshot, doc, trace);
         try
         {
             // Native preflight may pump host events. Recheck intent and target before the actual mutation.

@@ -34,6 +34,8 @@ public sealed class HostImportTrace
     private readonly string _version;
     private readonly Guid _attemptId = Guid.NewGuid();
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private double _elapsedMilliseconds;
     private readonly Queue<TraceEvent> _events = new();
     private readonly string _directory = string.Empty;
     private DateTimeOffset _updatedAt;
@@ -44,6 +46,8 @@ public sealed class HostImportTrace
     private bool _isPersisted;
 
     public string ReportPath { get; } = string.Empty;
+    public event Action<string, TimeSpan>? StageChanged;
+    public TimeSpan Elapsed { get { lock (_sync) return TimeSpan.FromMilliseconds(_elapsedMilliseconds); } }
 
     /// <summary>True only when the latest snapshot was successfully persisted.</summary>
     public bool IsPersisted { get { lock (_sync) return _isPersisted; } }
@@ -68,11 +72,17 @@ public sealed class HostImportTrace
 
     public void Record(string stage, string? detail = null)
     {
+        string safeStage = Sanitize(stage, 96) ?? "unknown";
+        TimeSpan elapsed;
         lock (_sync)
         {
-            AddEvent(Sanitize(stage, 96) ?? "unknown", Sanitize(detail, 1_024));
+            AddEvent(safeStage, Sanitize(detail, 1_024));
             Persist();
+            elapsed = TimeSpan.FromMilliseconds(_elapsedMilliseconds);
         }
+        // Presentation failures must not interrupt or change an import transaction.
+        foreach (Delegate handler in StageChanged?.GetInvocationList() ?? Array.Empty<Delegate>())
+            try { ((Action<string, TimeSpan>)handler)(safeStage, elapsed); } catch { }
     }
 
     public void Complete(string state)
@@ -117,7 +127,9 @@ public sealed class HostImportTrace
             _events.Dequeue();
             _droppedEvents++;
         }
-        _events.Enqueue(new TraceEvent(_updatedAt, stage, detail));
+        double elapsed = _clock.Elapsed.TotalMilliseconds;
+        _events.Enqueue(new TraceEvent(_updatedAt, stage, detail, elapsed, elapsed - _elapsedMilliseconds));
+        _elapsedMilliseconds = elapsed;
     }
 
     private void Persist()
@@ -139,6 +151,7 @@ public sealed class HostImportTrace
                 startedAt = _startedAt,
                 updatedAt = _updatedAt,
                 completedAt = _completedAt,
+                elapsedMilliseconds = _elapsedMilliseconds,
                 result = _result,
                 events = _events.ToArray(),
                 droppedEvents = _droppedEvents,
@@ -179,6 +192,6 @@ public sealed class HostImportTrace
         }
     }
 
-    private sealed record TraceEvent(DateTimeOffset Timestamp, string Stage, string? Detail);
+    private sealed record TraceEvent(DateTimeOffset Timestamp, string Stage, string? Detail, double ElapsedMilliseconds, double SincePreviousEventMilliseconds);
     private sealed record TraceFailure(string ExceptionType, string? Message);
 }

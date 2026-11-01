@@ -97,17 +97,7 @@ public static class Lux3DSelfTest
                     CheckValue(checks, label + $"/placement-plane{index}-angle{angle}", () => VerifyPlacement(asset, placement, tolerance));
                 }
                 var intent = new PlacementIntent(Plane.WorldXY, new Point3d(2 * height, -3 * height, height), height, 37);
-                CheckValue(checks, label + "/preview20-no-document-mutation", () =>
-                {
-                    var ids = Lux3DHostService.Objects(document).Select(o => o.Id).ToArray();
-                    uint undoNumber = document.NextUndoRecordSerialNumber;
-                    using var preview = new CandidatePreview();
-                    for (int i = 0; i < 20; i++) preview.Show(asset, intent with { RotationDegrees = i % 2 == 0 ? 37 : -22 });
-                    preview.Clear();
-                    Require(ids.SequenceEqual(Lux3DHostService.Objects(document).Select(o => o.Id)), "预览改变了文档对象。");
-                    Require(document.NextUndoRecordSerialNumber == undoNumber, "预览改变了 Undo 序列。");
-                    return new { switches = 20, generationRequests = 0 };
-                });
+                CheckValue(checks, label + "/preview-cache-transform-lifecycle", () => VerifyPreview(document, asset, intent, tolerance));
                 Guid importId = Guid.NewGuid();
                 ImportReceipt receipt = host.Commit(asset, intent, importId);
                 CheckValue(checks, label + "/one-block-and-replay", () =>
@@ -168,7 +158,7 @@ public static class Lux3DSelfTest
         var payload = new
         {
             schemaVersion = 1, createdUtc = DateTimeOffset.UtcNow, rhinoVersion = global::Rhino.RhinoApp.Version.ToString(),
-            pluginVersion = typeof(Lux3DSelfTest).Assembly.GetName().Version?.ToString(), fixture = Path.GetFileName(fixturePath), fixtureSha256 = sha,
+            pluginVersion = Lux3DPlugin.DisplayVersion, fixture = Path.GetFileName(fixturePath), fixtureSha256 = sha,
             automaticChecksPassed = checks.All(c => c.Passed), fullP0Acceptance = false,
             remaining = new[] { "真实 Lux3D 文字/照片生成", "OAuth 用户实际授权及权限", "Rendered 视觉及 PBR 每个通道映射", "关闭 Rhino 后在无原纹理缓存环境重开", "活动文档 A/B 切换与双插件共存" },
             checks, evidence,
@@ -211,6 +201,81 @@ public static class Lux3DSelfTest
         Require(validRemoved == 0 && unchanged.DataCRC(0) == repaired.DataCRC(0), "有效网格不应重新计算或简化。");
         return new { removedDegenerateFaces = removed, vertices = repaired.Vertices.Count, triangles = repaired.Faces.Count, preservedSource = true, preservedUvAndColors = true };
     }
+    private static object VerifyPreview(RhinoDoc document, PreparedAsset asset, PlacementIntent intent, double tolerance)
+    {
+        Guid[] ids = Lux3DHostService.Objects(document).Select(obj => obj.Id).ToArray();
+        uint undoNumber = document.NextUndoRecordSerialNumber;
+        Mesh[] sourceMeshes = Lux3DHostService.Meshes(Lux3DHostService.Objects(asset.Staging), Transform.Identity)
+            .Select(item => item.Mesh).ToArray();
+        uint[] sourceCrcs = sourceMeshes.Select(mesh => mesh.DataCRC(0)).ToArray();
+        using var preview = new CandidatePreview();
+        preview.Show(asset, intent);
+        CandidatePreview.PreviewState initial = preview.CaptureState();
+        Require(initial.Visible && initial.GeometryCache is not null && initial.MeshCount > 0, "首次预览没有建立可见缓存。");
+
+        // Only move the disposable prepared snapshot, never the user's fixture.
+        // Successful slider updates now prove that they do not reopen/hash it.
+        string parkedSnapshot = asset.SnapshotPath + ".preview-test-" + Guid.NewGuid().ToString("N");
+        File.Move(asset.SnapshotPath, parkedSnapshot);
+        double maximumBoundsError = 0;
+        try
+        {
+            for (int index = 0; index < 20; index++)
+            {
+                PlacementIntent next = intent with
+                {
+                    Height = intent.Height * (1 + index * 0.05),
+                    RotationDegrees = index % 2 == 0 ? 37 : -22,
+                    Plane = index % 2 == 0 ? Plane.WorldXY : new Plane(Point3d.Origin, new Vector3d(1, 1, 0), new Vector3d(-1, 1, 2))
+                };
+                preview.Show(asset, next);
+                CandidatePreview.PreviewState state = preview.CaptureState();
+                Require(ReferenceEquals(initial.GeometryCache, state.GeometryCache) && state.MeshCount == initial.MeshCount,
+                    "只改变放置参数时重新创建了预览网格或材质缓存。");
+                Require(state.DocumentSerial == asset.DocumentSerial, "预览失去了目标文档过滤。");
+                Transform expected = next.ToTransform(asset.Audit.Bounds);
+                for (int row = 0; row < 4; row++)
+                for (int column = 0; column < 4; column++)
+                    Require(Math.Abs(state.ModelTransform[row, column] - expected[row, column]) <= 1e-12,
+                        "预览绘制矩阵不符合放置意图。");
+                Point3d[] corners = state.SourceBounds.GetCorners();
+                for (int corner = 0; corner < corners.Length; corner++) corners[corner].Transform(expected);
+                BoundingBox expectedBounds = new(corners);
+                maximumBoundsError = Math.Max(maximumBoundsError, Math.Max(
+                    expectedBounds.Min.DistanceTo(state.Bounds.Min), expectedBounds.Max.DistanceTo(state.Bounds.Max)));
+            }
+            Require(maximumBoundsError <= tolerance, "变换后的预览包围盒不包含源包围盒的全部角点。");
+            using var uncachedPreview = new CandidatePreview();
+            bool rejectedMissingSnapshot = false;
+            try { uncachedPreview.Show(asset, intent); }
+            catch (InvalidOperationException) { rejectedMissingSnapshot = true; }
+            Require(rejectedMissingSnapshot && !uncachedPreview.Enabled && uncachedPreview.CaptureState().GeometryCache is null,
+                "首次加载预览没有校验缺失快照，或失败后遗留资源。");
+        }
+        finally { File.Move(parkedSnapshot, asset.SnapshotPath); }
+
+        preview.Clear();
+        preview.Clear();
+        CandidatePreview.PreviewState cleared = preview.CaptureState();
+        Require(!preview.Enabled && !cleared.Visible && cleared.GeometryCache is null && cleared.MeshCount == 0 && !cleared.Bounds.IsValid,
+            "Clear 没有释放缓存、清除包围盒或关闭显示。");
+        preview.Show(asset, intent);
+        Require(!ReferenceEquals(initial.GeometryCache, preview.CaptureState().GeometryCache), "Clear 后错误地复用了已释放的缓存。");
+        preview.Dispose();
+        preview.Dispose();
+        CandidatePreview.PreviewState disposed = preview.CaptureState();
+        Require(disposed.Disposed && !disposed.Visible && disposed.GeometryCache is null, "Dispose 没有释放预览资源。");
+        bool rejectedAfterDispose = false;
+        try { preview.Show(asset, intent); }
+        catch (ObjectDisposedException) { rejectedAfterDispose = true; }
+        Require(rejectedAfterDispose, "已释放的预览不应重新启用。");
+        Require(sourceCrcs.SequenceEqual(sourceMeshes.Select(mesh => mesh.DataCRC(0))), "预览改变了源网格、法向或 UV。");
+        Require(ids.SequenceEqual(Lux3DHostService.Objects(document).Select(obj => obj.Id)), "预览改变了文档对象。");
+        Require(document.NextUndoRecordSerialNumber == undoNumber, "预览改变了 Undo 序列。");
+        return new { updates = 20, cacheReused = true, sourceUnchanged = true, lifecycleVerified = true,
+            transformUpdatesWithoutSnapshotIo = true, maximumBoundsError, tolerance, generationRequests = 0 };
+    }
+
     private static object VerifyPlacement(PreparedAsset asset, PlacementIntent placement, double tolerance)
     {
         BoundingBox b = asset.Audit.Bounds;

@@ -34,9 +34,10 @@ public sealed record AssetAudit(long Meshes, long Vertices, long Triangles, int 
 
 public sealed class PreparedAsset : IDisposable
 {
-    internal PreparedAsset(string snapshotPath, string sha256, RhinoDoc staging, AssetAudit audit, string documentSessionId, uint documentSerial)
+    private readonly GlbImportSnapshot _snapshot;
+    internal PreparedAsset(GlbImportSnapshot snapshot, RhinoDoc staging, AssetAudit audit, string documentSessionId, uint documentSerial)
     {
-        SnapshotPath = snapshotPath; Sha256 = sha256; Staging = staging; Audit = audit;
+        _snapshot = snapshot; SnapshotPath = snapshot.Path; Sha256 = snapshot.Sha256; Staging = staging; Audit = audit;
         DocumentSessionId = documentSessionId; DocumentSerial = documentSerial;
     }
     public string Sha256 { get; }
@@ -55,8 +56,8 @@ public sealed class PreparedAsset : IDisposable
     }
     public void Dispose()
     {
-        Staging.Dispose();
-        try { Directory.Delete(Path.GetDirectoryName(SnapshotPath)!, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        try { Staging.Dispose(); }
+        finally { _snapshot.Dispose(); }
     }
 }
 
@@ -102,18 +103,14 @@ public sealed class Lux3DHostService : IDisposable
     public PreparedAsset Prepare(string path, string? expectedSha256, RhinoDoc target, HostImportTrace? trace = null)
     {
         RequireUiThread();
+        GlbImportSnapshot snapshot = GlbImportSnapshot.Create(path, expectedSha256, trace);
+        try { return Prepare(snapshot, target, trace); }
+        catch { snapshot.Dispose(); throw; }
+    }
+    internal PreparedAsset Prepare(GlbImportSnapshot snapshot, RhinoDoc target, HostImportTrace? trace = null)
+    {
+        RequireUiThread();
         trace?.Record("preflight_start");
-        if (!File.Exists(path)) throw new FileNotFoundException("本地 GLB 不存在。", path);
-        byte[] bytes = File.ReadAllBytes(path);
-        GlbContainerValidator.Validate(bytes);
-        trace?.Record("preflight_container_valid");
-        string sha = Convert.ToHexString(SHA256.HashData(bytes));
-        if (expectedSha256 is not null && !string.Equals(sha, expectedSha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("GLB 哈希与任务记录不一致。");
-        string directory = Path.Combine(Path.GetTempPath(), "Lux3D-Rhino", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        string snapshot = Path.Combine(directory, "asset.glb");
-        File.WriteAllBytes(snapshot, bytes);
         RhinoDoc? stage = null;
         try
         {
@@ -123,7 +120,7 @@ public sealed class Lux3DHostService : IDisposable
             HashSet<Guid> existingDefinitions = stage.InstanceDefinitions.GetList(true).Select(d => d.Id).ToHashSet();
             trace?.Record("preflight_native_import_start");
             bool imported;
-            try { imported = stage.Import(snapshot, new ArchivableDictionary()); }
+            try { imported = stage.Import(snapshot.Path, new ArchivableDictionary()); }
             catch (Exception ex)
             {
                 trace?.Record("preflight_native_import_exception", ex.Message);
@@ -144,13 +141,13 @@ public sealed class Lux3DHostService : IDisposable
                 RecomputedNormalMeshes = repairs.Meshes.Count,
             };
             trace?.Record("preflight_audit_complete", AuditDetail(audit));
-            return new PreparedAsset(snapshot, sha, stage, audit, Session(target), target.RuntimeSerialNumber);
+            return new PreparedAsset(snapshot, stage, audit, Session(target), target.RuntimeSerialNumber);
         }
         catch (Exception ex)
         {
             trace?.Record("preflight_failed", ex.Message);
             try { stage?.Dispose(); } catch { }
-            try { Directory.Delete(directory, true); } catch { }
+            snapshot.Dispose();
             throw;
         }
     }
@@ -510,40 +507,194 @@ public sealed class Lux3DHostService : IDisposable
 /// <summary>Conduit preview never adds document objects or undo records. It previews shape/base color, not full PBR.</summary>
 public sealed class CandidatePreview : DisplayConduit, IDisposable
 {
-    private readonly List<(Mesh Mesh, DisplayMaterial Material)> _items = new();
+    private readonly object _sync = new();
+    private PreviewGeometry? _geometry;
+    private Transform _modelTransform = Transform.Identity;
     private BoundingBox _bounds = BoundingBox.Empty;
     private uint _documentSerial;
+    private bool _visible;
+    private bool _disposed;
+
     public void Show(PreparedAsset asset, PlacementIntent placement)
     {
-        Clear();
-        asset.Verify();
+        RequireUiThread();
+        ArgumentNullException.ThrowIfNull(asset);
+        lock (_sync)
+            if (_disposed) throw new ObjectDisposedException(nameof(CandidatePreview));
         Transform placementTransform = placement.ToTransform(asset.Audit.Bounds);
-        _documentSerial = asset.DocumentSerial;
-        foreach (var (source, transform, obj) in Lux3DHostService.Meshes(Lux3DHostService.Objects(asset.Staging), Transform.Identity))
+        PreviewGeometry? current;
+        lock (_sync) current = _geometry;
+        PreviewGeometry next = current is not null && ReferenceEquals(current.Asset, asset)
+            ? current : PreviewGeometry.Create(asset);
+        BoundingBox bounds = next.SourceBounds;
+        if (!bounds.Transform(placementTransform) || !bounds.IsValid)
         {
-            Mesh mesh = source.DuplicateMesh();
-            mesh.Transform(placementTransform * transform);
-            _bounds.Union(mesh.GetBoundingBox(true));
-            _items.Add((mesh, new DisplayMaterial(obj.GetMaterial(true))));
+            if (!ReferenceEquals(next, current)) next.Dispose();
+            throw new InvalidOperationException("候选预览变换后的包围盒无效。");
         }
-        Enabled = true;
-        RhinoDoc.FromRuntimeSerialNumber(_documentSerial)?.Views.Redraw();
+        uint previousDocument;
+        lock (_sync)
+        {
+            previousDocument = _documentSerial;
+            _geometry = next;
+            _modelTransform = placementTransform;
+            _bounds = bounds;
+            _documentSerial = asset.DocumentSerial;
+            _visible = true;
+        }
+        // Draw callbacks hold _sync while using a cache. Once it has been swapped
+        // out here, no callback can still be drawing its meshes or materials.
+        if (!ReferenceEquals(current, next)) current?.Dispose();
+        if (!Enabled) Enabled = true;
+        if (previousDocument != 0 && previousDocument != asset.DocumentSerial)
+            Redraw(previousDocument);
+        Redraw(asset.DocumentSerial);
     }
+
     protected override void CalculateBoundingBox(CalculateBoundingBoxEventArgs e)
     {
-        if (e.RhinoDoc?.RuntimeSerialNumber == _documentSerial) e.IncludeBoundingBox(_bounds);
+        lock (_sync)
+            if (_visible && e.RhinoDoc?.RuntimeSerialNumber == _documentSerial)
+                e.IncludeBoundingBox(_bounds);
     }
+
+    protected override void CalculateBoundingBoxZoomExtents(CalculateBoundingBoxEventArgs e) => CalculateBoundingBox(e);
+
     protected override void PostDrawObjects(DrawEventArgs e)
     {
-        if (e.RhinoDoc?.RuntimeSerialNumber != _documentSerial) return;
-        foreach (var item in _items) e.Display.DrawMeshShaded(item.Mesh, item.Material);
+        lock (_sync)
+        {
+            if (!_visible || _geometry is null || e.RhinoDoc?.RuntimeSerialNumber != _documentSerial) return;
+            // PushModelTransform sets, rather than multiplies, the current matrix.
+            // Keep any enclosing display transform and always restore its stack.
+            e.Display.PushModelTransform(e.Display.ModelTransform * _modelTransform);
+            try
+            {
+                foreach (var item in _geometry.Items)
+                    e.Display.DrawMeshShaded(item.Mesh, item.Material);
+            }
+            finally { e.Display.PopModelTransform(); }
+        }
     }
+
     public void Clear()
     {
+        RequireUiThread();
+        lock (_sync)
+            if (_disposed || (!_visible && _geometry is null)) return;
         Enabled = false;
-        foreach (var item in _items) { item.Mesh.Dispose(); item.Material.Dispose(); }
-        _items.Clear(); _bounds = BoundingBox.Empty;
-        RhinoDoc.FromRuntimeSerialNumber(_documentSerial)?.Views.Redraw();
+        PreviewGeometry? previous;
+        uint previousDocument;
+        lock (_sync)
+        {
+            previous = _geometry;
+            previousDocument = _documentSerial;
+            _geometry = null;
+            _bounds = BoundingBox.Empty;
+            _modelTransform = Transform.Identity;
+            _documentSerial = 0;
+            _visible = false;
+        }
+        try { previous?.Dispose(); }
+        finally { Redraw(previousDocument); }
     }
-    public void Dispose() { Clear(); GC.SuppressFinalize(this); }
+
+    public void Dispose()
+    {
+        RequireUiThread();
+        lock (_sync)
+            if (_disposed) return;
+        try { Clear(); }
+        finally
+        {
+            lock (_sync) _disposed = true;
+            GC.SuppressFinalize(this);
+        }
+    }
+
+    // Read-only lifecycle evidence for the in-Rhino self-test; never used on the draw path.
+    internal PreviewState CaptureState()
+    {
+        lock (_sync)
+            return new PreviewState(_geometry, _modelTransform, _geometry?.SourceBounds ?? BoundingBox.Empty,
+                _bounds, _documentSerial, _geometry?.Items.Length ?? 0, _visible, _disposed);
+    }
+
+    internal readonly record struct PreviewState(object? GeometryCache, Transform ModelTransform,
+        BoundingBox SourceBounds, BoundingBox Bounds, uint DocumentSerial, int MeshCount, bool Visible, bool Disposed);
+
+    private static void RequireUiThread()
+    {
+        if (global::Rhino.RhinoApp.InvokeRequired)
+            throw new InvalidOperationException("候选预览只能在 Rhino UI 线程更新或释放。");
+    }
+
+    private static void Redraw(uint documentSerial)
+    {
+        if (documentSerial != 0) RhinoDoc.FromRuntimeSerialNumber(documentSerial)?.Views.Redraw();
+    }
+
+    private sealed class PreviewGeometry : IDisposable
+    {
+        private PreviewGeometry(PreparedAsset asset, (Mesh Mesh, DisplayMaterial Material)[] items, BoundingBox bounds)
+        {
+            Asset = asset; Items = items; SourceBounds = bounds;
+        }
+        public PreparedAsset Asset { get; }
+        public (Mesh Mesh, DisplayMaterial Material)[] Items { get; private set; }
+        public BoundingBox SourceBounds { get; }
+
+        public static PreviewGeometry Create(PreparedAsset asset)
+        {
+            // Verify on first load/switch only. Commit independently verifies the
+            // snapshot again; slider changes use this immutable geometry cache.
+            asset.Verify();
+            var items = new List<(Mesh Mesh, DisplayMaterial Material)>();
+            BoundingBox bounds = BoundingBox.Empty;
+            try
+            {
+                foreach (var (source, transform, obj) in Lux3DHostService.Meshes(Lux3DHostService.Objects(asset.Staging), Transform.Identity))
+                {
+                    Mesh? mesh = source.DuplicateMesh();
+                    DisplayMaterial? material = null;
+                    try
+                    {
+                        // Bake only the asset's node transform, once. Placement
+                        // scale/rotation/translation stays on the display stack.
+                        if (!mesh.Transform(transform)) throw new InvalidOperationException("候选网格的节点变换失败。");
+                        bounds.Union(mesh.GetBoundingBox(true));
+                        material = new DisplayMaterial(obj.GetMaterial(true));
+                        items.Add((mesh, material));
+                        mesh = null; material = null;
+                    }
+                    finally { try { mesh?.Dispose(); } finally { material?.Dispose(); } }
+                }
+                if (items.Count == 0 || !bounds.IsValid) throw new InvalidOperationException("候选没有可预览的网格。");
+                return new PreviewGeometry(asset, items.ToArray(), bounds);
+            }
+            catch
+            {
+                DisposeItems(items);
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            var items = Items;
+            Items = Array.Empty<(Mesh, DisplayMaterial)>();
+            DisposeItems(items);
+        }
+
+        private static void DisposeItems(IEnumerable<(Mesh Mesh, DisplayMaterial Material)> items)
+        {
+            Exception? failure = null;
+            foreach (var item in items)
+            {
+                try { item.Mesh.Dispose(); } catch (Exception ex) { failure ??= ex; }
+                try { item.Material.Dispose(); } catch (Exception ex) { failure ??= ex; }
+            }
+            if (failure is not null) throw new InvalidOperationException("候选预览资源释放未完成。", failure);
+        }
+    }
 }
