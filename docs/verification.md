@@ -65,4 +65,15 @@ Shell 脚本通过 `bash -n`，Python 脚本通过 AST 语法解析，差异通�
 
 直接演示入口为 `_Lux3DPlaceTask e0056392-4a2c-4f03-b044-41bf201a4143`：读取已缓存的原任务，按 1 米参考高度换算至当前文档单位，放到当前 CPlane，创建独立 Block 并定位视图。面板也提供“放入当前文档”，新生成任务默认启用完成后自动放置。自动意图绑定提交时的文档/会话/单位/位置；关闭面板后由用户手动继续。稳定导入编号防重复，一次 Undo；撤销/删除后当前会话内不自动重放，保存重开时可识别仍存在的原 Block。
 
-本轮不使用 Computer Use、不自动操作 Rhino。真实宿主的 GLB 解码、视觉/PBR、Undo/Redo 与 Windows 实机仍须手动验收；离线策略或包安装验证不能替代这些结果。构建、安装及原任务恢复证据在下方补录。
+本轮不使用 Computer Use、不自动操作 Rhino。真实宿主的 GLB 解码、视觉/PBR、Undo/Redo 与 Windows 实机仍须手动验收；离线策略或包安装验证不能替代这些结果。
+
+本轮实际完成的检查：
+
+- 二进制源码提交 `6868f72528e150afdc6bc7682176c52130268ca5`（包含校验修复 `809c148`）。Release 构建 0 warning / 0 error，Core **91/91**、Provider **39/39**，共 **130/130** 通过；两个自制 fixture 的可再生校验通过。
+- 真实原 GLB 已按最终无插件数量门槛策略通过 Core 校验。回归覆盖原模型规模、超过旧门槛的几何/数组/贴图、20,000 层节点链、环与非法索引；不等于执行原生解码或视觉检查。
+- Rhino 官方 Yak 安装 **0.1.2** 成功，**25/25** 安装文件 SHA-256 与包一致。安装目录 `~/Library/Application Support/McNeel/Rhinoceros/packages/8.0/lux3d-rhino/0.1.2`。
+- 使用该安装目录内的 Sidecar 运行 `--recover-task e0056392-4a2c-4f03-b044-41bf201a4143`，原服务任务 `4545638` 从本地 `Rejected` 恢复为 **Ready**，`error` / `validationCode` 为空，缓存哈希与上述原文件一致。已保留恢复前的本地记录，没有调用创建接口。
+- 已安装 Sidecar 的 `getTask` / `hasUnknown` 两次私有协议请求通过，版本和请求 ID 匹配、stderr 为空。默认沙箱启动未成功，随后在正常本机权限下完成检查；该检查不调用 Provider。
+- 演示文件 `artifacts/demo/longmen-buddha.glb` 与任务缓存哈希一致；证据为 `artifacts/glb-diagnostic/validation-fixed.json`、`artifacts/glb-diagnostic/recovery-installed.json` 和 `artifacts/install-verification-mac.json`。这些本地文件不包含 API Key、token 或签名下载 URL，也不提交生成资产到 Git。
+
+最终已安装包为 `artifacts/package-mac.22HYbo/lux3d-rhino-0.1.2-rh8_32-mac.yak`，SHA-256 `7412fb904a2f71c862669c67f053e05da3f459eea79cdd0410270d266256ea40`。包内文档保留构建时状态，此段为安装后的补录。用户需保存当前文档并重启 Rhino 后执行上述演示命令；尚未声称模型已显示在 Rhino 中。
