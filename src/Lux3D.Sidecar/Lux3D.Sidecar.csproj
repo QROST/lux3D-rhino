@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework><OutputType>Exe</OutputType><UseAppHost>false</UseAppHost></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Lux3D.Core/Lux3D.Core.csproj" />
+    <ProjectReference Include="../Lux3D.Provider/Lux3D.Provider.csproj" />
+  </ItemGroup>
+</Project>
