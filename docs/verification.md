@@ -86,4 +86,13 @@ Shell 脚本通过 `bash -n`，Python 脚本通过 AST 语法解析，差异通�
 
 另已核实两个独立实现错误：`RhinoDoc.IsLocked` 表示本实例持有文件写锁，不能作为不可写判据；默认 `ObjectAttributes.LayerIndex` 为 0，不能代替当前可见图层。0.1.3 修正写锁检查并明确模型空间、当前图层；活动布局纸面需切换模型视口再放置。原生预检、网格修复、正式导入、Block 和视图阶段记录到本地 JSON，错误同时写入命令历史，避免只显示短暂底部状态。
 
-本轮继续只自动构建与安装，不控制 Rhino 界面、不创建生成任务。原生 Import、最终显示、完整材质及 Windows 实机仍保留为待验证项；后续构建/安装证据另行补录。
+本轮继续只自动构建与安装，不控制 Rhino 界面、不创建生成任务。原生 Import、最终显示、完整材质及 Windows 实机仍保留为待验证项。
+
+0.1.3 已执行记录：
+
+- 二进制源码提交 `b6e9bedd26dcb36e99381b46846360a1581f219f`。Release 构建 **0 warning / 0 error**，Core **97/97**、Provider **39/39**，合计 **136/136** 通过；两个固定 GLB fixture 再生检查通过。
+- 主线程独立重建并复核实际生成网格，确认原网格无效、清理 5 面并重算法线后有效，顶点数不变；证据 `artifacts/glb-diagnostic/mesh-repair-root-verification.json`。新增 Rhino 宿主自测覆盖源网格、顶点、UV、颜色不变及有效网格不修复；该宿主自测只完成编译，未执行。
+- Rhino 官方 Yak 安装 **0.1.3** 成功，**25/25** 已安装文件与包完全一致。包为 `artifacts/package-mac.7LKuwX/lux3d-rhino-0.1.3-rh8_32-mac.yak`，SHA-256 `12fb5bc09cc19c81a7731d60777aacbc4d03a464e5bf6c595af5b26c7e03b373`。
+- 已安装 Sidecar 的只读 `getTask` 协议验证通过；原任务仍 Ready、原资产 SHA-256 未变，stderr 为空。本次未访问账户或发起生成，证据 `artifacts/glb-diagnostic/installed-013-smoke.json`。
+
+用户需保存文档并重启 Rhino，确认命令历史显示 `Lux3D 0.1.3.0 已加载`，在模型视图重新放入原任务。模型实际显示、PBR 与单次 Undo 尚待用户手动验收；若失败，面板和命令历史会显示本地 `host-diagnostics` 报告路径。此段为安装后补录，包内文档保留构建时状态。
