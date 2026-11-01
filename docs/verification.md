@@ -125,3 +125,11 @@ Shell 脚本通过 `bash -n`，Python 脚本通过 AST 语法解析，差异通�
 - 从服务器提供的[公开下载地址](https://files.mcneel.com/yak/packages/lux3d-rhino-0.1.4-beta.1-rh8_32-mac.yak)重新下载，SHA-256 与上述本地包完全一致。版本响应与下载证据保存在 `artifacts/yak-publication/`。
 
 本段为发布后补录，不改变已上传归档；包内文档保留构建时的发布候选状态。安装及公开下载校验不替代 Rhino 新版 UI、完整 PBR、Undo/Redo 或 Windows 的宿主验收；本轮未自动控制 Rhino，也未新增付费生成任务。
+
+## 2026-11-01 原生插件属性修复（0.1.4-beta.2）
+
+用户截图确认 beta.1 的 Rhino Plug-in Properties 中 Publisher、Description、Web site 为空。源码复核发现 Yak `authors` 与 .NET `AssemblyCompany` 已设置，但漏掉了 Rhino 专用的 `PlugInDescription` 属性，且没有 `AssemblyDescription`。此前的发布包作者核验没有覆盖这个原生属性页，这是已确认的元数据遗漏。
+
+beta.2 补齐 `DescriptionType.Organization = CuriousArc`、`DescriptionType.WebSite = https://github.com/QROST/lux3D-rhino`；通过 SDK 的 `Description` 生成程序集说明，包含公司、个人作者署名、功能及 API Key 要求。使用 RhinoCommon 的[开发者信息属性](https://developer.rhino3d.com/api/rhinocommon/type/rhino.plugins.plugindescriptionattribute/)；未核实的地址、国家、电话和邮箱不填充。插件 GUID 和生成/导入代码不变。
+
+编译已通过，0 warning / 0 error；直接读取 RHP 的 ECMA-335 程序集元数据验证发布者、网站、说明、完整预发布版本及原 GUID，避免只检查源码或 Yak 清单。宿主属性页的数字版本仍为 `0.1.4.0`，完整 `0.1.4-beta.2` 版本见 Yak 和插件加载消息；[AssemblyVersion 不支持预发布后缀](https://developer.rhino3d.com/en/guides/scripting/projects-create/)。加载新版必须重启 Rhino，不清理用户配置或操作桌面。实际属性页视觉结果仍待用户确认；最终安装和发布结果另行补录。

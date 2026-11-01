@@ -2,20 +2,21 @@
 
 [English](readme.md) | 简体中文
 
-由 **CuriousArc · QROST / Zhongding Cui (addincui)** 开发的独立 Rhino 集成，非 Manycore、Aholo 或 McNeel 官方产品。支持 Manycore OAuth 登录、Lux3D 文字/单图任务、持久资产缓存、GLB 候选预览和独立 Block 放置。当前版本为 **0.1.4-beta.1**；本次 Yak 发行目标为 **macOS / Rhino 8.32+**。Windows 适配代码和构建入口已具备，实机验收及公开发行包待完成。
+由 **CuriousArc · QROST / Zhongding Cui (addincui)** 开发的独立 Rhino 集成，非 Manycore、Aholo 或 McNeel 官方产品。支持 Manycore OAuth 登录、Lux3D 文字/单图任务、持久资产缓存、GLB 候选预览和独立 Block 放置。当前版本为 **0.1.4-beta.2**；本次 Yak 发行目标为 **macOS / Rhino 8.32+**。Windows 适配代码和构建入口已具备，实机验收及公开发行包待完成。
 
 **当前版本生成模型需要所选区域的 API Key。Manycore OAuth 登录成功后仍需配置 API Key；也可以跳过插件内 OAuth 登录，直接配置 API Key。**
 
-当前验证状态详见 [docs/verification.md](docs/verification.md)。用户已确认 macOS 上 0.1.3 的 OAuth 登录、API Key 生成及佛像模型放入后正常显示。0.1.4-beta.1 的新界面和预览交互、完整 PBR、Undo/Redo、保存重开及 Windows 实机仍待专项验收；已有版本的成功不替代新改动的验收。
+当前验证状态详见 [docs/verification.md](docs/verification.md)。用户已确认 macOS 上 0.1.3 的 OAuth 登录、API Key 生成及佛像模型放入后正常显示。0.1.4-beta.2 的新界面和预览交互、完整 PBR、Undo/Redo、保存重开及 Windows 实机仍待专项验收；已有版本的成功不替代新改动的验收。
 
 ## 本次预览版
 
+- Rhino 插件属性页现已补齐 **CuriousArc** 发布者、项目网站和包含个人作者署名的说明。这些原生字段独立于 Yak 作者信息；beta.1 遗漏了它们。升级后需重启 Rhino。
 - 生成页直接设置高度、位置与旋转，并显示 API Key 状态；候选可单独移除。
 - 放置过程显示实际阶段和耗时；本次面板会话内保留任务结果和错误，自动查询不会覆盖未解决的导入错误。
 - 同一候选调整尺寸或角度时复用网格和材质，连续输入合并刷新；没有新增几何数量门槛或自动减面。
 - 直接放置时，文件读取、结构校验和快照准备在后台执行；Rhino 原生预检和正式导入仍在主线程运行，期间界面可能短暂等待。诊断报告包含分阶段单调计时，尚未宣称具体提速倍数。
 
-Yak 包名为 `lux3d-rhino`，版本为 `0.1.4-beta.1`。在 macOS Rhino 中运行 `PackageManager`、启用预发行版本显示后选择该版本；安装后保存文档并重启 Rhino。仍需 .NET 8 Runtime 和区域 API Key。也可按下方步骤从源码构建本地候选；是否已上传以 [验证记录](docs/verification.md)及 Yak 服务器为准。
+Yak 包名为 `lux3d-rhino`，版本为 `0.1.4-beta.2`。在 macOS Rhino 中运行 `PackageManager`、启用预发行版本显示后选择该版本；安装后保存文档并重启 Rhino。仍需 .NET 8 Runtime 和区域 API Key。也可按下方步骤从源码构建本地候选；是否已上传以 [验证记录](docs/verification.md)及 Yak 服务器为准。
 
 ## OAuth 登录与生成授权
 
