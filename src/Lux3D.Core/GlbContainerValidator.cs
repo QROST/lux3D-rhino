@@ -10,35 +10,12 @@ public sealed record GlbContainerInfo(
 
 public static class GlbContainerValidator
 {
-    internal const int MaximumJsonChunkBytes = 4 * 1024 * 1024;
-    internal const int MaximumNodes = 4_096;
-    internal const int MaximumAccessorElements = 1_500_000;
-    internal const int MaximumTotalAccessorElements = 4_000_000;
-    internal const long MaximumTotalAccessorDecodedBytes = 64L * 1024 * 1024;
-    internal const int MaximumImageDimension = 4_096;
-    internal const long MaximumImagePixels = 16L * 1024 * 1024;
-    internal const long MaximumTotalImagePixels = 32L * 1024 * 1024;
-
     private const uint GlbMagic = 0x46546C67;
     private const uint GlbVersion = 2;
     private const uint JsonChunkType = 0x4E4F534A;
     private const uint BinaryChunkType = 0x004E4942;
     private const int HeaderLength = 12;
     private const int ChunkHeaderLength = 8;
-    private const int MaximumScenes = 128;
-    private const int MaximumMeshes = 4_096;
-    private const int MaximumPrimitives = 8_192;
-    private const int MaximumAccessors = 16_384;
-    private const int MaximumBufferViews = 16_384;
-    private const int MaximumMaterials = 256;
-    private const int MaximumImages = 512;
-    private const int MaximumTextures = 512;
-    private const int MaximumSamplers = 512;
-    private const int MaximumSkins = 512;
-    private const int MaximumAnimations = 512;
-    private const int MaximumCameras = 512;
-    private const int MaximumAnimationEntries = 4_096;
-    private const int MaximumImageHeaderScanBytes = 1024 * 1024;
 
     public static GlbContainerInfo Validate(byte[] data)
     {
@@ -51,11 +28,6 @@ public static class GlbContainerValidator
         if (data.Length < HeaderLength + ChunkHeaderLength)
         {
             throw Invalid("The GLB container is too short.");
-        }
-
-        if (data.Length > AssetLimits.MaximumGlbArtifactBytes)
-        {
-            throw Invalid("The GLB container exceeds the direct-import size limit.");
         }
 
         uint magic = BinaryPrimitives.ReadUInt32LittleEndian(data);
@@ -95,18 +67,17 @@ public static class GlbContainerValidator
                 BinaryPrimitives.ReadUInt32LittleEndian(data[(offset + 4)..]);
             offset += ChunkHeaderLength;
             if (chunkLengthValue == 0 ||
-                chunkLengthValue > int.MaxValue ||
                 (chunkLengthValue & 3) != 0)
             {
                 throw Invalid(
                     "A GLB chunk has an invalid or unaligned byte length.");
             }
 
-            int chunkLength = checked((int)chunkLengthValue);
-            if (chunkLength > data.Length - offset)
+            if (chunkLengthValue > (uint)(data.Length - offset))
             {
                 throw Invalid("A GLB chunk extends beyond the declared container.");
             }
+            int chunkLength = checked((int)chunkLengthValue);
 
             ReadOnlySpan<byte> chunk = data.Slice(offset, chunkLength);
             if (chunkType == JsonChunkType)
@@ -160,11 +131,6 @@ public static class GlbContainerValidator
         ReadOnlySpan<byte> jsonChunk,
         ReadOnlySpan<byte> binaryChunk)
     {
-        if (jsonChunk.Length > MaximumJsonChunkBytes)
-        {
-            throw Invalid("The GLB JSON chunk exceeds its bounded size.");
-        }
-
         try
         {
             using JsonDocument document = JsonDocument.Parse(
@@ -173,7 +139,9 @@ public static class GlbContainerValidator
                 {
                     AllowTrailingCommas = false,
                     CommentHandling = JsonCommentHandling.Disallow,
-                    MaxDepth = 64,
+                    // JSON nesting cannot exceed its actual byte length. Let the
+                    // parser validate structure without an asset complexity quota.
+                    MaxDepth = jsonChunk.Length,
                 });
             JsonElement root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
@@ -202,18 +170,18 @@ public static class GlbContainerValidator
             AccessorInfo[] accessors =
                 ValidateAccessors(root, bufferViews);
             int materialCount =
-                GetBoundedObjectArrayLength(root, "materials", MaximumMaterials);
+                GetObjectArrayLength(root, "materials");
             int imageCount = ValidateImages(root, bufferViews, binaryChunk);
             ValidateTextures(root, imageCount);
-            MeshInfo[] meshes =
+            int meshCount =
                 ValidateMeshes(root, accessors, materialCount, binaryChunk);
             int skinCount =
-                GetBoundedObjectArrayLength(root, "skins", MaximumSkins);
+                GetObjectArrayLength(root, "skins");
             int cameraCount =
-                GetBoundedObjectArrayLength(root, "cameras", MaximumCameras);
+                GetObjectArrayLength(root, "cameras");
             int nodeCount =
-                GetBoundedObjectArrayLength(root, "nodes", MaximumNodes);
-            ValidateNodes(root, nodeCount, meshes, skinCount, cameraCount);
+                GetObjectArrayLength(root, "nodes");
+            ValidateNodes(root, nodeCount, meshCount, skinCount, cameraCount);
             ValidateScenes(root, nodeCount);
             ValidateSkins(root, nodeCount, accessors.Length);
             ValidateAnimations(root, nodeCount, accessors.Length);
@@ -225,11 +193,16 @@ public static class GlbContainerValidator
                 "The GLB JSON chunk is malformed.",
                 exception);
         }
+        catch (OverflowException exception)
+        {
+            throw new AssetValidationException(
+                "glb_invalid", "The GLB contains an unrepresentable byte range.", exception);
+        }
     }
 
     private static int ValidateBuffer(JsonElement root, int binaryChunkLength)
     {
-        JsonElement? buffers = GetOptionalBoundedArray(root, "buffers", 1);
+        JsonElement? buffers = GetOptionalArray(root, "buffers");
         if (buffers is null)
         {
             if (binaryChunkLength != 0)
@@ -252,9 +225,7 @@ public static class GlbContainerValidator
             buffer,
             "byteLength",
             1,
-            checked((int)Math.Min(
-                AssetLimits.MaximumGlbArtifactBytes,
-                int.MaxValue)));
+            binaryChunkLength);
         if (binaryChunkLength == 0 ||
             byteLength > binaryChunkLength ||
             binaryChunkLength - byteLength > 3)
@@ -270,10 +241,9 @@ public static class GlbContainerValidator
         JsonElement root,
         int bufferByteLength)
     {
-        JsonElement? views = GetOptionalBoundedArray(
+        JsonElement? views = GetOptionalArray(
             root,
-            "bufferViews",
-            MaximumBufferViews);
+            "bufferViews");
         if (views is null)
         {
             return [];
@@ -321,10 +291,9 @@ public static class GlbContainerValidator
         JsonElement root,
         IReadOnlyList<BufferViewInfo> bufferViews)
     {
-        JsonElement? accessors = GetOptionalBoundedArray(
+        JsonElement? accessors = GetOptionalArray(
             root,
-            "accessors",
-            MaximumAccessors);
+            "accessors");
         if (accessors is null)
         {
             return [];
@@ -332,23 +301,11 @@ public static class GlbContainerValidator
 
         AccessorInfo[] result =
             new AccessorInfo[accessors.Value.GetArrayLength()];
-        long totalElements = 0;
-        long totalDecodedBytes = 0;
         for (int index = 0; index < result.Length; index++)
         {
             JsonElement accessor =
                 GetObjectEntry(accessors.Value[index], "accessors");
-            int count = GetRequiredBoundedInt32(
-                accessor,
-                "count",
-                1,
-                MaximumAccessorElements);
-            totalElements += count;
-            if (totalElements > MaximumTotalAccessorElements)
-            {
-                throw Invalid(
-                    "The GLB accessors exceed the aggregate element limit.");
-            }
+            int count = GetRequiredPositiveInt32(accessor, "count");
             int componentType = GetRequiredBoundedInt32(
                 accessor,
                 "componentType",
@@ -363,13 +320,6 @@ public static class GlbContainerValidator
             };
             string type = GetRequiredString(accessor, "type");
             int elementSize = GetAccessorElementSize(type, componentSize);
-            totalDecodedBytes = checked(
-                totalDecodedBytes + (long)count * elementSize);
-            if (totalDecodedBytes > MaximumTotalAccessorDecodedBytes)
-            {
-                throw Invalid(
-                    "The GLB accessors exceed the aggregate decoded byte limit.");
-            }
 
             JsonElement? bufferViewProperty =
                 GetOptionalUniqueProperty(accessor, "bufferView");
@@ -378,7 +328,7 @@ public static class GlbContainerValidator
             if (sparseProperty is not null)
             {
                 throw Invalid(
-                    "Sparse GLB accessors are not supported by the bounded native-import subset.");
+                    "Sparse GLB accessors are not supported by the native-import subset.");
             }
 
             if (bufferViewProperty is null)
@@ -390,7 +340,7 @@ public static class GlbContainerValidator
                 }
 
                 // Accessors without a bufferView are legal zero-initialized
-                // accessors. Their decoded budget is still enforced here.
+                // accessors; this structural validator does not materialize them.
                 result[index] = new AccessorInfo(
                     count,
                     type,
@@ -444,42 +394,29 @@ public static class GlbContainerValidator
         return result;
     }
 
-    private static MeshInfo[] ValidateMeshes(
+    private static int ValidateMeshes(
         JsonElement root,
         IReadOnlyList<AccessorInfo> accessors,
         int materialCount,
         ReadOnlySpan<byte> binaryChunk)
     {
         JsonElement? meshes =
-            GetOptionalBoundedArray(root, "meshes", MaximumMeshes);
+            GetOptionalArray(root, "meshes");
         if (meshes is null)
         {
-            return [];
+            return 0;
         }
 
-        MeshInfo[] result = new MeshInfo[meshes.Value.GetArrayLength()];
-        int primitiveCount = 0;
-        long triangleCount = 0;
-        long vertexCount = 0;
         Dictionary<int, uint> maximumIndexByAccessor = [];
-        int meshIndex = 0;
         foreach (JsonElement meshValue in meshes.Value.EnumerateArray())
         {
             JsonElement mesh = GetObjectEntry(meshValue, "meshes");
-            long meshTriangleCount = 0;
-            long meshVertexCount = 0;
             JsonElement primitives =
                 GetRequiredUniqueProperty(mesh, "primitives");
             if (primitives.ValueKind != JsonValueKind.Array ||
                 primitives.GetArrayLength() == 0)
             {
                 throw Invalid("Every GLB mesh must contain primitives.");
-            }
-
-            primitiveCount = checked(primitiveCount + primitives.GetArrayLength());
-            if (primitiveCount > MaximumPrimitives)
-            {
-                throw Invalid("The GLB meshes exceed the primitive limit.");
             }
 
             foreach (JsonElement primitiveValue in primitives.EnumerateArray())
@@ -518,7 +455,7 @@ public static class GlbContainerValidator
                     primitive,
                     "material",
                     materialCount);
-                int mode = GetOptionalBoundedInt32(
+                _ = GetOptionalBoundedInt32(
                     primitive,
                     "mode",
                     0,
@@ -605,43 +542,15 @@ public static class GlbContainerValidator
                     }
                 }
 
-                meshVertexCount += position.Count;
-                vertexCount += position.Count;
-                if (vertexCount > AssetLimits.MaximumVertices)
-                {
-                    throw Invalid(
-                        "The GLB mesh exceeds the pre-native vertex limit.");
-                }
-
-                int elementCount = indexAccessor is null
-                    ? position.Count
-                    : accessors[indexAccessor.Value].Count;
-                long primitiveTriangles = mode switch
-                {
-                    4 => elementCount / 3,
-                    5 or 6 => Math.Max(0, elementCount - 2),
-                    _ => 0,
-                };
-                meshTriangleCount += primitiveTriangles;
-                triangleCount += primitiveTriangles;
-                if (triangleCount > AssetLimits.MaximumTriangles)
-                {
-                    throw Invalid(
-                        "The GLB mesh exceeds the pre-native triangle limit.");
-                }
-
                 ValidatePrimitiveTargets(
                     primitive,
                     accessors,
                     position.Count);
             }
 
-            result[meshIndex++] = new MeshInfo(
-                meshVertexCount,
-                meshTriangleCount);
         }
 
-        return result;
+        return meshes.Value.GetArrayLength();
     }
 
     private static void ValidatePrimitiveTargets(
@@ -655,8 +564,7 @@ public static class GlbContainerValidator
             return;
         }
 
-        if (targets.Value.ValueKind != JsonValueKind.Array ||
-            targets.Value.GetArrayLength() > 64)
+        if (targets.Value.ValueKind != JsonValueKind.Array)
         {
             throw Invalid("A GLB primitive has invalid morph targets.");
         }
@@ -744,13 +652,12 @@ public static class GlbContainerValidator
         ReadOnlySpan<byte> binaryChunk)
     {
         JsonElement? images =
-            GetOptionalBoundedArray(root, "images", MaximumImages);
+            GetOptionalArray(root, "images");
         if (images is null)
         {
             return 0;
         }
 
-        long totalPixels = 0;
         foreach (JsonElement imageValue in images.Value.EnumerateArray())
         {
             JsonElement image = GetObjectEntry(imageValue, "images");
@@ -775,12 +682,6 @@ public static class GlbContainerValidator
                     "Only embedded PNG and JPEG GLB images are supported."),
             };
             ValidateImageDimensions(width, height);
-            totalPixels += (long)width * height;
-            if (totalPixels > MaximumTotalImagePixels)
-            {
-                throw Invalid(
-                    "The embedded GLB images exceed the aggregate decoded pixel limit.");
-            }
         }
 
         return images.Value.GetArrayLength();
@@ -789,9 +690,9 @@ public static class GlbContainerValidator
     private static void ValidateTextures(JsonElement root, int imageCount)
     {
         int samplerCount =
-            GetBoundedObjectArrayLength(root, "samplers", MaximumSamplers);
+            GetObjectArrayLength(root, "samplers");
         JsonElement? textures =
-            GetOptionalBoundedArray(root, "textures", MaximumTextures);
+            GetOptionalArray(root, "textures");
         if (textures is null)
         {
             return;
@@ -808,7 +709,7 @@ public static class GlbContainerValidator
     private static void ValidateNodes(
         JsonElement root,
         int nodeCount,
-        IReadOnlyList<MeshInfo> meshes,
+        int meshCount,
         int skinCount,
         int cameraCount)
     {
@@ -822,35 +723,21 @@ public static class GlbContainerValidator
             .Select(_ => new List<int>())
             .ToArray();
         int[] parentCounts = new int[nodeCount];
-        long instancedVertices = 0;
-        long instancedTriangles = 0;
         int nodeIndex = 0;
         foreach (JsonElement nodeValue in nodes.Value.EnumerateArray())
         {
             JsonElement node = GetObjectEntry(nodeValue, "nodes");
-            int? mesh = GetOptionalIndex(node, "mesh", meshes.Count);
-            if (mesh is not null)
-            {
-                instancedVertices += meshes[mesh.Value].VertexCount;
-                instancedTriangles += meshes[mesh.Value].TriangleCount;
-                if (instancedVertices > AssetLimits.MaximumVertices ||
-                    instancedTriangles > AssetLimits.MaximumTriangles)
-                {
-                    throw Invalid(
-                        "The GLB node instances exceed the pre-native mesh budget.");
-                }
-            }
+            ValidateOptionalIndex(node, "mesh", meshCount);
             ValidateOptionalIndex(node, "skin", skinCount);
             ValidateOptionalIndex(node, "camera", cameraCount);
             JsonElement? childValues =
                 GetOptionalUniqueProperty(node, "children");
             if (childValues is not null)
             {
-                if (childValues.Value.ValueKind != JsonValueKind.Array ||
-                    childValues.Value.GetArrayLength() > MaximumNodes)
+                if (childValues.Value.ValueKind != JsonValueKind.Array)
                 {
                     throw Invalid(
-                        "The GLB node children exceed their bounded size.");
+                        "The GLB node children must be an array.");
                 }
 
                 foreach (JsonElement childValue in
@@ -914,13 +801,13 @@ public static class GlbContainerValidator
     private static void ValidateScenes(JsonElement root, int nodeCount)
     {
         JsonElement? scenes =
-            GetOptionalBoundedArray(root, "scenes", MaximumScenes);
+            GetOptionalArray(root, "scenes");
         if (scenes is not null)
         {
             foreach (JsonElement sceneValue in scenes.Value.EnumerateArray())
             {
                 JsonElement scene = GetObjectEntry(sceneValue, "scenes");
-                ValidateIndexArray(scene, "nodes", nodeCount, MaximumNodes);
+                ValidateIndexArray(scene, "nodes", nodeCount);
             }
         }
 
@@ -944,7 +831,7 @@ public static class GlbContainerValidator
         foreach (JsonElement skinValue in skins.Value.EnumerateArray())
         {
             JsonElement skin = GetObjectEntry(skinValue, "skins");
-            ValidateIndexArray(skin, "joints", nodeCount, MaximumNodes);
+            ValidateIndexArray(skin, "joints", nodeCount);
             ValidateOptionalIndex(skin, "skeleton", nodeCount);
             ValidateOptionalIndex(
                 skin,
@@ -959,7 +846,7 @@ public static class GlbContainerValidator
         int accessorCount)
     {
         JsonElement? animations =
-            GetOptionalBoundedArray(root, "animations", MaximumAnimations);
+            GetOptionalArray(root, "animations");
         if (animations is null)
         {
             return;
@@ -976,11 +863,9 @@ public static class GlbContainerValidator
                 animation,
                 "channels");
             if (samplers.ValueKind != JsonValueKind.Array ||
-                samplers.GetArrayLength() > MaximumAnimationEntries ||
-                channels.ValueKind != JsonValueKind.Array ||
-                channels.GetArrayLength() > MaximumAnimationEntries)
+                channels.ValueKind != JsonValueKind.Array)
             {
-                throw Invalid("A GLB animation exceeds its bounded size.");
+                throw Invalid("A GLB animation must have sampler and channel arrays.");
             }
 
             foreach (JsonElement samplerValue in samplers.EnumerateArray())
@@ -1018,8 +903,7 @@ public static class GlbContainerValidator
     private static void ValidateIndexArray(
         JsonElement parent,
         string propertyName,
-        int referencedCount,
-        int maximumCount)
+        int referencedCount)
     {
         JsonElement? property =
             GetOptionalUniqueProperty(parent, propertyName);
@@ -1028,11 +912,10 @@ public static class GlbContainerValidator
             return;
         }
 
-        if (property.Value.ValueKind != JsonValueKind.Array ||
-            property.Value.GetArrayLength() > maximumCount)
+        if (property.Value.ValueKind != JsonValueKind.Array)
         {
             throw Invalid(
-                $"The GLB {propertyName} property exceeds its bounded size.");
+                $"The GLB {propertyName} property must be an array.");
         }
 
         foreach (JsonElement value in property.Value.EnumerateArray())
@@ -1069,10 +952,9 @@ public static class GlbContainerValidator
                 referencedCount - 1);
     }
 
-    private static JsonElement? GetOptionalBoundedArray(
+    private static JsonElement? GetOptionalArray(
         JsonElement parent,
-        string propertyName,
-        int maximumCount)
+        string propertyName)
     {
         JsonElement? property =
             GetOptionalUniqueProperty(parent, propertyName);
@@ -1081,23 +963,21 @@ public static class GlbContainerValidator
             return null;
         }
 
-        if (property.Value.ValueKind != JsonValueKind.Array ||
-            property.Value.GetArrayLength() > maximumCount)
+        if (property.Value.ValueKind != JsonValueKind.Array)
         {
             throw Invalid(
-                $"The GLB {propertyName} property exceeds its bounded size.");
+                $"The GLB {propertyName} property must be an array.");
         }
 
         return property;
     }
 
-    private static int GetBoundedObjectArrayLength(
+    private static int GetObjectArrayLength(
         JsonElement root,
-        string propertyName,
-        int maximumCount)
+        string propertyName)
     {
         JsonElement? collection =
-            GetOptionalBoundedArray(root, propertyName, maximumCount);
+            GetOptionalArray(root, propertyName);
         if (collection is null)
         {
             return 0;
@@ -1180,6 +1060,18 @@ public static class GlbContainerValidator
             propertyName,
             minimum,
             maximum);
+
+    private static int GetRequiredPositiveInt32(JsonElement parent, string propertyName)
+    {
+        JsonElement value = GetRequiredUniqueProperty(parent, propertyName);
+        if (value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out int result) || result <= 0)
+        {
+            throw Invalid($"The GLB {propertyName} property must be a positive 32-bit integer.");
+        }
+
+        return result;
+    }
 
     private static int GetOptionalBoundedInt32(
         JsonElement parent,
@@ -1275,8 +1167,9 @@ public static class GlbContainerValidator
             0x89, (byte)'P', (byte)'N', (byte)'G',
             0x0D, 0x0A, 0x1A, 0x0A,
         ];
-        if (image.Length < 24 ||
+        if (image.Length < 33 ||
             !image[..8].SequenceEqual(signature) ||
+            BinaryPrimitives.ReadUInt32BigEndian(image[8..]) != 13 ||
             !image.Slice(12, 4).SequenceEqual("IHDR"u8))
         {
             throw Invalid("An embedded GLB PNG image has an invalid header.");
@@ -1287,6 +1180,19 @@ public static class GlbContainerValidator
         if (width > int.MaxValue || height > int.MaxValue)
         {
             throw Invalid("An embedded GLB PNG image has invalid dimensions.");
+        }
+
+        byte bitDepth = image[24];
+        bool validColorTypeAndDepth = image[25] switch
+        {
+            0 => bitDepth is 1 or 2 or 4 or 8 or 16,
+            2 or 4 or 6 => bitDepth is 8 or 16,
+            3 => bitDepth is 1 or 2 or 4 or 8,
+            _ => false,
+        };
+        if (!validColorTypeAndDepth || image[26] != 0 || image[27] != 0 || image[28] > 1)
+        {
+            throw Invalid("An embedded GLB PNG image has invalid header fields.");
         }
 
         return ((int)width, (int)height);
@@ -1300,9 +1206,9 @@ public static class GlbContainerValidator
             throw Invalid("An embedded GLB JPEG image has an invalid header.");
         }
 
-        int limit = Math.Min(image.Length, MaximumImageHeaderScanBytes);
+        int limit = image.Length;
         int offset = 2;
-        while (offset + 3 < limit)
+        while (limit - offset >= 4)
         {
             while (offset < limit && image[offset] != 0xFF)
             {
@@ -1325,14 +1231,14 @@ public static class GlbContainerValidator
                 continue;
             }
 
-            if (offset + 2 > limit)
+            if (limit - offset < 2)
             {
                 break;
             }
 
             int segmentLength =
                 BinaryPrimitives.ReadUInt16BigEndian(image[offset..]);
-            if (segmentLength < 2 || offset + segmentLength > limit)
+            if (segmentLength < 2 || segmentLength > limit - offset)
             {
                 throw Invalid(
                     "An embedded GLB JPEG image has an invalid segment.");
@@ -1357,7 +1263,7 @@ public static class GlbContainerValidator
         }
 
         throw Invalid(
-            "An embedded GLB JPEG image has no bounded dimension header.");
+            "An embedded GLB JPEG image has no dimension header within its resource.");
     }
 
     private static bool IsJpegStartOfFrame(byte marker) =>
@@ -1368,14 +1274,10 @@ public static class GlbContainerValidator
 
     private static void ValidateImageDimensions(int width, int height)
     {
-        if (width <= 0 ||
-            height <= 0 ||
-            width > MaximumImageDimension ||
-            height > MaximumImageDimension ||
-            (long)width * height > MaximumImagePixels)
+        if (width <= 0 || height <= 0)
         {
             throw Invalid(
-                "An embedded GLB image exceeds the decoded dimension limit.");
+                "An embedded GLB image has invalid dimensions.");
         }
     }
 
@@ -1432,7 +1334,4 @@ public static class GlbContainerValidator
         int RelativeByteOffset,
         int Stride);
 
-    private sealed record MeshInfo(
-        long VertexCount,
-        long TriangleCount);
 }

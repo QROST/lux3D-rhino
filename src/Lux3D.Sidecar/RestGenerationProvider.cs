@@ -48,13 +48,11 @@ internal sealed class RestGenerationProvider : IGenerationProvider
                 uri = new Uri(uri, response.Headers.Location); continue;
             }
             response.EnsureSuccessStatusCode();
-            if (response.Content.Headers.ContentLength > AssetLimits.MaximumGlbArtifactBytes) throw new IOException("GLB 超过 64 MiB 上限。");
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var output = new MemoryStream(); byte[] buffer = new byte[64 * 1024];
             int count;
             while ((count = await stream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
             {
-                if (output.Length + count > AssetLimits.MaximumGlbArtifactBytes) throw new IOException("GLB 超过 64 MiB 上限。");
                 output.Write(buffer, 0, count);
             }
             return output.ToArray();

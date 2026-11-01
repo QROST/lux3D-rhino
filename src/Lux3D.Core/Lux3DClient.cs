@@ -18,6 +18,7 @@ public sealed class Lux3DClient : IAsyncDisposable
     public Task<ConnectionInfo> LogoutAsync(string region, CancellationToken cancellationToken = default) => Call<ConnectionInfo>("logout", new { region }, cancellationToken);
     public Task<ConnectionInfo> SetApiKeyAsync(string region, string apiKey, bool persist, CancellationToken cancellationToken = default) => Call<ConnectionInfo>("setKey", new { region, apiKey, persist }, cancellationToken);
     public Task<TaskRecord[]> ListTasksAsync(CancellationToken cancellationToken = default) => Call<TaskRecord[]>("list", new { }, cancellationToken);
+    public Task<TaskRecord> GetTaskAsync(Guid operationId, CancellationToken cancellationToken = default) => Call<TaskRecord>("getTask", new { operationId }, cancellationToken);
     public Task<TaskRecord[]> ListTasksAsync(int offset, int limit, CancellationToken cancellationToken = default) => Call<TaskRecord[]>("list", new { offset, limit }, cancellationToken);
     public Task<bool> HasUnknownSubmissionsAsync(CancellationToken cancellationToken = default) => Call<bool>("hasUnknown", new { }, cancellationToken);
     public Task<TaskRecord> GenerateAsync(string region, GenerationInput input, CancellationToken cancellationToken = default) => Call<TaskRecord>("generate", new { region, input }, cancellationToken);

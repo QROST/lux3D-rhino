@@ -43,6 +43,46 @@ public sealed class WorkflowTests : IDisposable
         Assert.Equal("Ready", (await workflow.RefreshAsync(_provider, task.OperationId)).State);
         Assert.Equal(1, _provider.Creates);
     }
+    [Fact] public async Task RejectedAssetKeepsDiagnosticAndRecoversOriginalTaskWithoutCreatingAgain()
+    {
+        _provider.Payload = new byte[] { 1, 2, 3 };
+        var store = new TaskStore(_root);
+        var workflow = new Workflow(store);
+        var created = await workflow.GenerateAsync(_provider, new("chair"));
+        var rejected = await workflow.RefreshAsync(_provider, created.OperationId);
+        Assert.Equal("Rejected", rejected.State);
+        Assert.Equal(created.TaskId, rejected.TaskId);
+        Assert.Equal("glb_invalid", rejected.ValidationCode);
+        Assert.Contains("too short", rejected.Error);
+        Assert.Null(rejected.AssetPath);
+        Assert.Equal(_provider.Payload, File.ReadAllBytes(rejected.RejectedAssetPath!));
+        Assert.Equal(rejected.RejectedAssetSha256, store.Get(created.OperationId).RejectedAssetSha256);
+
+        _provider.Payload = GlbContainerValidatorTests.CreateTexturedTriangleGlb();
+        var recovered = await workflow.RefreshAsync(_provider, created.OperationId);
+        Assert.Equal("Ready", recovered.State);
+        Assert.Equal(created.TaskId, recovered.TaskId);
+        Assert.Null(recovered.ValidationCode);
+        Assert.Null(recovered.RejectedAssetPath);
+        Assert.Null(recovered.Error);
+        Assert.Equal(1, _provider.Creates);
+        Assert.Equal(2, _provider.Queries);
+        Assert.Equal(2, _provider.Downloads);
+    }
+    [Fact] public async Task MemoryFailureIsRecoverableAndDoesNotRejectGeometry()
+    {
+        _provider.ResourceFailure = true;
+        var workflow = new Workflow(new TaskStore(_root));
+        var created = await workflow.GenerateAsync(_provider, new("chair"));
+        var failed = await workflow.RefreshAsync(_provider, created.OperationId);
+        Assert.Equal("DownloadFailed", failed.State);
+        Assert.Contains("内存不足", failed.Error);
+        Assert.Null(failed.ValidationCode);
+        Assert.Equal(created.TaskId, failed.TaskId);
+        _provider.ResourceFailure = false;
+        Assert.Equal("Ready", (await workflow.RefreshAsync(_provider, created.OperationId)).State);
+        Assert.Equal(1, _provider.Creates);
+    }
     [Fact] public async Task UnknownRemoteStateNeverDownloadsOrImports()
     {
         _provider.State = "StatusUnknown";
@@ -68,14 +108,15 @@ public sealed class WorkflowTests : IDisposable
         public string Region => "global";
         public string ConnectionId { get; set; } = "test-identity";
         public int Creates, Queries, Downloads;
-        public bool LoseResponse, FailDownload, Reject;
+        public bool LoseResponse, FailDownload, Reject, ResourceFailure;
+        public byte[]? Payload;
         public string State = "Succeeded";
         public Task<string> CreateAsync(GenerationInput input, CancellationToken ct)
         { Creates++; if (Reject) throw new SubmissionRejectedException("credentials rejected"); if (LoseResponse) throw new IOException("response lost"); return Task.FromResult("9223372036854775800"); }
         public Task<RemoteTask> QueryAsync(string taskId, CancellationToken ct)
         { Queries++; return Task.FromResult(new RemoteTask(taskId, State, 3, new Uri("https://example.com/model.glb"))); }
         public Task<byte[]> DownloadAsync(Uri uri, CancellationToken ct)
-        { Downloads++; if (FailDownload) throw new IOException("lost"); return Task.FromResult(GlbContainerValidatorTests.CreateTexturedTriangleGlb()); }
+        { Downloads++; if (ResourceFailure) throw new OutOfMemoryException(); if (FailDownload) throw new IOException("lost"); return Task.FromResult(Payload ?? GlbContainerValidatorTests.CreateTexturedTriangleGlb()); }
     }
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

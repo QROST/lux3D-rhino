@@ -26,6 +26,25 @@ var credentials = CredentialStoreFactory.CreateDefault();
 var sessionKeys = new Dictionary<string, ApiKeyCredential>();
 var sessionTokens = new Dictionary<string, OAuthToken>();
 
+if (args.Length == 2 && args[0] == "--recover-task")
+{
+    try
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+        Guid operationId = Guid.Parse(args[1]);
+        var result = (TaskRecord)await Dispatch(new RpcRequest(1, Guid.NewGuid(), "refresh", LuxJson.Element(new { operationId })), timeout.Token);
+        Console.WriteLine(JsonSerializer.Serialize(new { result.OperationId, result.TaskId, result.State, result.AssetPath,
+            result.AssetSha256, result.ValidationCode, result.Error }, LuxJson.Options));
+        if (result.State != "Ready") Environment.ExitCode = 2;
+    }
+    catch (Exception ex)
+    {
+        string message = ex is ProviderException or InvalidOperationException ? ex.Message : "原任务恢复未完成，请检查任务编号、已保存的原区域凭证与网络。";
+        Console.WriteLine(message); Environment.ExitCode = 2;
+    }
+    return;
+}
+
 if (args.Length == 2 && args[0] is "--oauth-login" or "--oauth-probe")
 {
     try
@@ -85,6 +104,7 @@ async Task<object> Dispatch(RpcRequest request, CancellationToken ct)
     JsonElement p = request.Payload;
     if (request.Method == "list") return store.List(p.TryGetProperty("offset", out var offset) ? offset.GetInt32() : 0, p.TryGetProperty("limit", out var limit) ? limit.GetInt32() : 30);
     if (request.Method == "hasUnknown") return store.HasUnknownSubmissions();
+    if (request.Method == "getTask") return store.Get(p.GetProperty("operationId").GetGuid());
     if (request.Method == "refresh")
     {
         Guid operationId = p.GetProperty("operationId").GetGuid();

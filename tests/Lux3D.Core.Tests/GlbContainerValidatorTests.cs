@@ -16,17 +16,13 @@ public sealed class GlbContainerValidatorTests
     public void ValidateAcceptsEmbeddedGlbVersion2()
     {
         byte[] pngHeader = CreatePngHeader(width: 16, height: 8);
-        byte[] glb = BuildGlb(
-            """
-            {"asset":{"version":"2.0"},"buffers":[{"byteLength":24}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":24}],"images":[{"bufferView":0,"mimeType":"image/png"}],"textures":[{"source":0}]}
-            """,
-            pngHeader);
+        byte[] glb = BuildImageGlb(pngHeader, "image/png");
 
         Lux3D.Core.GlbContainerInfo info =
             Lux3D.Core.GlbContainerValidator.Validate(glb);
 
         Assert.True(info.JsonChunkLength > 0);
-        Assert.Equal(24, info.BinaryChunkLength);
+        Assert.Equal((pngHeader.Length + 3) & ~3, info.BinaryChunkLength);
     }
 
     [Fact]
@@ -146,6 +142,15 @@ public sealed class GlbContainerValidatorTests
         AssertInvalid(glb);
     }
 
+    [Fact]
+    public void ValidateRejectsChunkLengthBeyondActualContainerWithoutAllocation()
+    {
+        byte[] glb = BuildGlb("""{"asset":{"version":"2.0"}}""");
+        BinaryPrimitives.WriteUInt32LittleEndian(glb.AsSpan(12), 0xFFFFFFFC);
+
+        AssertInvalid(glb);
+    }
+
     [Theory]
     [InlineData("""{}""")]
     [InlineData("""{"asset":{}}""")]
@@ -178,46 +183,99 @@ public sealed class GlbContainerValidatorTests
     }
 
     [Fact]
-    public void ValidateRejectsOversizedJsonBeforeParsing()
+    public void ValidateAcceptsJsonAboveFormerSizeLimit()
     {
         string padding = new(
             ' ',
-            Lux3D.Core.GlbContainerValidator.MaximumJsonChunkBytes);
+            4 * 1024 * 1024);
         byte[] glb = BuildGlb(
             """{"asset":{"version":"2.0"},"extras":""" +
             JsonSerializer.Serialize(padding) +
             "}");
 
-        AssertInvalid(glb);
+        Lux3D.Core.GlbContainerValidator.Validate(glb);
     }
 
     [Fact]
-    public void ValidateRejectsExcessiveNodeCount()
+    public void ValidateAcceptsDeepJsonExtrasWithinActualContainer()
     {
-        string nodes = string.Join(
-            ',',
-            Enumerable.Repeat(
-                "{}",
-                Lux3D.Core.GlbContainerValidator.MaximumNodes + 1));
+        string extras = new string('[', 256) + "0" + new string(']', 256);
+        byte[] glb = BuildGlb("""{"asset":{"version":"2.0"},"extras":""" + extras + "}");
 
-        AssertInvalid(BuildGlb(
-            """{"asset":{"version":"2.0"},"nodes":[""" +
-            nodes +
-            "]}"));
+        Lux3D.Core.GlbContainerValidator.Validate(glb);
     }
 
     [Fact]
-    public void ValidateRejectsExcessiveAccessorElementCount()
+    public void ValidateAcceptsGeometryArraysAboveFormerCountLimits()
+    {
+        var primitive = new { attributes = new { POSITION = 0 } };
+        var meshes = Enumerable.Range(0, 4097).Select(index => new {
+            primitives = Enumerable.Repeat(primitive, index == 0 ? 8193 : 1).ToArray()
+        }).ToArray();
+        string json = JsonSerializer.Serialize(new {
+            asset = new { version = "2.0" },
+            buffers = new[] { new { byteLength = 36 } },
+            bufferViews = Enumerable.Repeat(new { buffer = 0, byteLength = 36 }, 16385).ToArray(),
+            accessors = Enumerable.Repeat(new { bufferView = 0, componentType = 5126, count = 3, type = "VEC3" }, 16385).ToArray(),
+            meshes,
+            nodes = Enumerable.Range(0, 4097).Select(index => new { mesh = index }).ToArray(),
+            scenes = Enumerable.Repeat(new { nodes = new[] { 0 } }, 129).ToArray(),
+            materials = Enumerable.Repeat(new { }, 257).ToArray()
+        });
+
+        Lux3D.Core.GlbContainerValidator.Validate(BuildGlb(json, new byte[36]));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ValidateDeepNodeChainWithoutRecursion(bool cyclic)
+    {
+        const int nodeCount = 20000;
+        string nodes = string.Join(',', Enumerable.Range(0, nodeCount).Select(index =>
+            index == nodeCount - 1
+                ? cyclic ? "{\"children\":[0]}" : "{}"
+                : "{\"children\":[" + (index + 1).ToString(CultureInfo.InvariantCulture) + "]}"));
+        byte[] glb = BuildGlb("""{"asset":{"version":"2.0"},"nodes":[""" + nodes + "]}");
+
+        if (cyclic)
+            AssertInvalid(glb);
+        else
+            Lux3D.Core.GlbContainerValidator.Validate(glb);
+    }
+
+    [Fact]
+    public void ValidateRejectsAccessorCountBeyondActualBuffer()
     {
         string json =
             "{\"asset\":{\"version\":\"2.0\"}," +
             "\"buffers\":[{\"byteLength\":4}]," +
             "\"bufferViews\":[{\"buffer\":0,\"byteLength\":4}]," +
             "\"accessors\":[{\"bufferView\":0,\"componentType\":5121,\"count\":" +
-            (Lux3D.Core.GlbContainerValidator.MaximumAccessorElements + 1)
-                .ToString(CultureInfo.InvariantCulture) +
+            "1500001" +
             ",\"type\":\"SCALAR\"}]}";
         byte[] glb = BuildGlb(json, new byte[4]);
+
+        AssertInvalid(glb);
+    }
+
+    [Theory]
+    [InlineData("""{"asset":{"version":"2.0"},"buffers":[{"byteLength":4}]}""")]
+    [InlineData("""{"asset":{"version":"2.0"},"bufferViews":[{"buffer":0,"byteLength":4}]}""")]
+    [InlineData("""{"asset":{"version":"2.0"},"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"}]}""")]
+    public void ValidateRejectsMissingEmbeddedResource(string json)
+    {
+        AssertInvalid(BuildGlb(json));
+    }
+
+    [Fact]
+    public void ValidateRejectsAccessorByteRangeOverflowAgainstActualBuffer()
+    {
+        byte[] glb = BuildGlb("""
+            {"asset":{"version":"2.0"},"buffers":[{"byteLength":4}],
+             "bufferViews":[{"buffer":0,"byteLength":4,"byteStride":252}],
+             "accessors":[{"bufferView":0,"componentType":5126,"count":2147483647,"type":"MAT4"}]}
+            """, new byte[4]);
 
         AssertInvalid(glb);
     }
@@ -235,50 +293,99 @@ public sealed class GlbContainerValidatorTests
     }
 
     [Fact]
-    public void ValidateRejectsDecodedImageDimensionBomb()
+    public void ValidateAcceptsImageDimensionsAboveFormerLimit()
     {
-        byte[] pngHeader = CreatePngHeader(
-            Lux3D.Core.GlbContainerValidator.MaximumImageDimension + 1,
-            height: 1);
-        byte[] glb = BuildGlb(
-            """
-            {"asset":{"version":"2.0"},"buffers":[{"byteLength":24}],"bufferViews":[{"buffer":0,"byteLength":24}],"images":[{"bufferView":0,"mimeType":"image/png"}]}
-            """,
-            pngHeader);
+        byte[] glb = BuildImageGlb(CreatePngHeader(8192, 8192), "image/png");
 
-        AssertInvalid(glb);
+        Lux3D.Core.GlbContainerValidator.Validate(glb);
+    }
+
+    [Theory]
+    [InlineData(0, 8192)]
+    [InlineData(8192, 0)]
+    [InlineData(-1, 1)]
+    public void ValidateRejectsInvalidPngDimensions(int width, int height)
+    {
+        AssertInvalid(BuildImageGlb(CreatePngHeader(width, height), "image/png"));
     }
 
     [Fact]
-    public void ValidateRejectsAggregateAccessorExpansion()
+    public void ValidateRejectsTruncatedPngHeaderWithinImageResource()
     {
-        string count = Lux3D.Core.GlbContainerValidator
-            .MaximumAccessorElements
-            .ToString(CultureInfo.InvariantCulture);
-        string accessor =
-            "{\"componentType\":5121,\"count\":" +
-            count +
-            ",\"type\":\"SCALAR\"}";
+        byte[] png = CreatePngHeader(8192, 8192);
+
+        AssertInvalid(BuildImageGlb(png[..24], "image/png"));
+    }
+
+    [Theory]
+    [InlineData(8, 255)]
+    [InlineData(24, 3)]
+    [InlineData(25, 7)]
+    [InlineData(26, 1)]
+    public void ValidateRejectsInvalidPngHeaderFields(int offset, byte value)
+    {
+        byte[] png = CreatePngHeader(8192, 8192);
+        png[offset] = value;
+
+        AssertInvalid(BuildImageGlb(png, "image/png"));
+    }
+
+    [Fact]
+    public void ValidateAcceptsJpegFrameBeyondFormerHeaderScanLimit()
+    {
+        using MemoryStream image = new();
+        image.Write(new byte[] { 0xFF, 0xD8 });
+        byte[] metadata = new byte[65533];
+        for (int segment = 0; segment < 17; segment++)
+        {
+            image.Write(new byte[] { 0xFF, 0xE1, 0xFF, 0xFF });
+            image.Write(metadata);
+        }
+        // A complete one-component SOF header, read without decoding image data.
+        image.Write(new byte[] { 0xFF, 0xC0, 0, 11, 8, 0x20, 0, 0x20, 0, 1, 1, 0x11, 0 });
+
+        Lux3D.Core.GlbContainerValidator.Validate(BuildImageGlb(image.ToArray(), "image/jpeg"));
+    }
+
+    [Fact]
+    public void ValidateRejectsJpegSegmentBeyondImageResource()
+    {
+        byte[] image = [0xFF, 0xD8, 0xFF, 0xE1, 0xFF, 0xFF, 0, 0];
+
+        AssertInvalid(BuildImageGlb(image, "image/jpeg"));
+    }
+
+    [Fact]
+    public void ValidateAcceptsAccessorsAboveFormerElementAndDecodedByteLimits()
+    {
+        // Shared embedded accessors describe over 6 million elements and over
+        // 64 MiB of decoded data without requiring a large test allocation.
+        const int count = 1_500_001;
+        byte[] binary = new byte[count];
+        string accessor = FormattableString.Invariant($$"""
+            {"bufferView":0,"componentType":5121,"count":{{count}},"type":"SCALAR"}
+            """);
         string json =
-            "{\"asset\":{\"version\":\"2.0\"},\"accessors\":[" +
-            string.Join(',', Enumerable.Repeat(accessor, 3)) +
-            "]}";
+            "{\"asset\":{\"version\":\"2.0\"},\"buffers\":[{\"byteLength\":" +
+            count.ToString(CultureInfo.InvariantCulture) + "}],\"bufferViews\":[{\"buffer\":0,\"byteLength\":" +
+            count.ToString(CultureInfo.InvariantCulture) + "}],\"accessors\":[" +
+            string.Join(',', Enumerable.Repeat(accessor, 48)) + "]}";
 
-        AssertInvalid(BuildGlb(json));
+        Lux3D.Core.GlbContainerValidator.Validate(BuildGlb(json, binary));
     }
 
-    [Fact]
-    public void ValidateRejectsAggregateAccessorDecodedByteExpansion()
+    [Theory]
+    [InlineData("2147483648")]
+    [InlineData("4294967296")]
+    [InlineData("1.5")]
+    [InlineData("0")]
+    [InlineData("-1")]
+    public void ValidateRejectsUnrepresentableOrInvalidAccessorCount(string count)
     {
-        int count = checked((int)(
-            Lux3D.Core.GlbContainerValidator
-                .MaximumTotalAccessorDecodedBytes /
-            (sizeof(float) * 16) +
-            1));
         string json =
             "{\"asset\":{\"version\":\"2.0\"}," +
             "\"accessors\":[{\"componentType\":5126,\"count\":" +
-            count.ToString(CultureInfo.InvariantCulture) +
+            count +
             ",\"type\":\"MAT4\"}]}";
 
         AssertInvalid(BuildGlb(json));
@@ -343,18 +450,19 @@ public sealed class GlbContainerValidatorTests
     }
 
     [Fact]
-    public void ValidateRejectsAggregateDecodedImageExpansion()
+    public void ValidateAcceptsImagePixelsAboveFormerAggregateLimit()
     {
-        byte[] pngHeader = CreatePngHeader(
-            Lux3D.Core.GlbContainerValidator.MaximumImageDimension,
-            Lux3D.Core.GlbContainerValidator.MaximumImageDimension);
-        byte[] glb = BuildGlb(
-            """
-            {"asset":{"version":"2.0"},"buffers":[{"byteLength":24}],"bufferViews":[{"buffer":0,"byteLength":24}],"images":[{"bufferView":0,"mimeType":"image/png"},{"bufferView":0,"mimeType":"image/png"},{"bufferView":0,"mimeType":"image/png"}]}
-            """,
-            pngHeader);
+        byte[] glb = BuildImageGlb(CreatePngHeader(4096, 4096), "image/png", imageCount: 3);
 
-        AssertInvalid(glb);
+        Lux3D.Core.GlbContainerValidator.Validate(glb);
+    }
+
+    [Fact]
+    public void ValidateAcceptsImageCountAboveFormerLimit()
+    {
+        byte[] glb = BuildImageGlb(CreatePngHeader(1, 1), "image/png", imageCount: 513);
+
+        Lux3D.Core.GlbContainerValidator.Validate(glb);
     }
 
     [Fact]
@@ -487,43 +595,116 @@ public sealed class GlbContainerValidatorTests
     }
 
     [Fact]
-    public void ValidateRejectsPreNativeMeshVertexExpansion()
+    public void ValidateAcceptsZeroInitializedAccessorInNativeCountRange()
     {
-        string count = (Lux3D.Core.AssetLimits.MaximumVertices + 1)
+        string count = int.MaxValue
             .ToString(CultureInfo.InvariantCulture);
         string json =
             "{\"asset\":{\"version\":\"2.0\"}," +
             "\"accessors\":[{\"componentType\":5126,\"count\":" +
             count +
             ",\"type\":\"VEC3\"}]," +
-            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}]}";
+            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"mode\":0}]}]}";
 
-        AssertInvalid(BuildGlb(json));
+        Lux3D.Core.GlbContainerValidator.Validate(BuildGlb(json));
+    }
+
+    [Theory]
+    [InlineData(272630, 283986)]
+    [InlineData(1600001, 600000)]
+    public void ValidateAcceptsIndexedMeshAboveFormerGeometryLimits(
+        int vertexCount, int triangleCount)
+    {
+        // The first case matches the rejected G1-Turbo result's geometry counts.
+        // The larger case exceeds the former vertex, triangle, accessor element
+        // and decoded byte quotas, while keeping indices in the embedded buffer.
+        byte[] glb = CreateIndexedMeshGlb(vertexCount, triangleCount);
+
+        Lux3D.Core.GlbContainerInfo info = Lux3D.Core.GlbContainerValidator.Validate(glb);
+
+        Assert.True(info.BinaryChunkLength > 0);
+    }
+
+    [Theory]
+    [InlineData(900000u)]
+    [InlineData(uint.MaxValue)]
+    public void ValidateRejectsMaliciousIndexInLargeMesh(uint finalIndex)
+    {
+        byte[] glb = CreateIndexedMeshGlb(900000, 300000, finalIndex);
+
+        AssertInvalid(glb);
     }
 
     [Fact]
-    public void ValidateRejectsSharedPositionAccessorPrimitiveExpansion()
+    public void ValidateAcceptsTriangleStripAboveFormerTriangleLimit()
     {
+        const int indexCount = 500003;
+        string json = FormattableString.Invariant($$"""
+            {"asset":{"version":"2.0"},
+             "accessors":[{"componentType":5126,"count":3,"type":"VEC3"},
+                          {"componentType":5125,"count":{{indexCount}},"type":"SCALAR"}],
+             "meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"mode":5}]}]}
+            """);
+
+        Lux3D.Core.GlbContainerValidator.Validate(BuildGlb(json));
+    }
+
+    [Fact]
+    public void ValidateAcceptsSharedPositionAccessorPrimitiveExpansion()
+    {
+        const int count = 900003;
         string json =
             "{\"asset\":{\"version\":\"2.0\"}," +
-            "\"accessors\":[{\"componentType\":5126,\"count\":200000,\"type\":\"VEC3\"}]," +
+            "\"accessors\":[{\"componentType\":5126,\"count\":" +
+            count.ToString(CultureInfo.InvariantCulture) + ",\"type\":\"VEC3\"}]," +
             "\"meshes\":[{\"primitives\":[" +
             "{\"attributes\":{\"POSITION\":0},\"mode\":0}," +
             "{\"attributes\":{\"POSITION\":0},\"mode\":0}]}]}";
 
-        AssertInvalid(BuildGlb(json));
+        Lux3D.Core.GlbContainerValidator.Validate(BuildGlb(json));
     }
 
     [Fact]
-    public void ValidateRejectsRepeatedNodeMeshExpansion()
+    public void ValidateAcceptsRepeatedNodeMeshExpansion()
     {
+        const int count = 900003;
         string json =
             "{\"asset\":{\"version\":\"2.0\"}," +
-            "\"accessors\":[{\"componentType\":5126,\"count\":200000,\"type\":\"VEC3\"}]," +
+            "\"accessors\":[{\"componentType\":5126,\"count\":" +
+            count.ToString(CultureInfo.InvariantCulture) + ",\"type\":\"VEC3\"}]," +
             "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"mode\":0}]}]," +
             "\"nodes\":[{\"mesh\":0},{\"mesh\":0}]}";
 
-        AssertInvalid(BuildGlb(json));
+        Lux3D.Core.GlbContainerValidator.Validate(BuildGlb(json));
+    }
+
+    private static byte[] CreateIndexedMeshGlb(int vertexCount, int triangleCount,
+        uint? finalIndex = null)
+    {
+        int indexCount = checked(triangleCount * 3);
+        byte[] indices = new byte[checked(indexCount * sizeof(uint))];
+        for (int index = 0; index < indexCount; index++)
+            BinaryPrimitives.WriteUInt32LittleEndian(indices.AsSpan(index * sizeof(uint)),
+                (uint)(index % vertexCount));
+        if (finalIndex is not null)
+            BinaryPrimitives.WriteUInt32LittleEndian(indices.AsSpan(indices.Length - sizeof(uint)),
+                finalIndex.Value);
+
+        // Missing attribute buffer views are legal zero-initialized accessors. Keep
+        // this structural fixture compact while storing and checking real indices.
+        string json = FormattableString.Invariant($$"""
+            {"asset":{"version":"2.0"},
+             "buffers":[{"byteLength":{{indices.Length}}}],
+             "bufferViews":[{"buffer":0,"byteLength":{{indices.Length}}}],
+             "accessors":[
+               {"componentType":5126,"count":{{vertexCount}},"type":"VEC3"},
+               {"componentType":5126,"count":{{vertexCount}},"type":"VEC3"},
+               {"componentType":5126,"count":{{vertexCount}},"type":"VEC2"},
+               {"componentType":5126,"count":{{vertexCount}},"type":"VEC4"},
+               {"bufferView":0,"componentType":5125,"count":{{indexCount}},"type":"SCALAR"}],
+             "meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"TANGENT":3},"indices":4}]}]}
+            """);
+        return BuildGlb(json, indices);
     }
 
     private static void AssertInvalid(byte[] data)
@@ -600,10 +781,25 @@ public sealed class GlbContainerValidatorTests
             (byte)'I', (byte)'H', (byte)'D', (byte)'R',
             0, 0, 0, 0,
             0, 0, 0, 0,
+            8, 6, 0, 0, 0,
+            0, 0, 0, 0,
         ];
         BinaryPrimitives.WriteInt32BigEndian(result.AsSpan(16), width);
         BinaryPrimitives.WriteInt32BigEndian(result.AsSpan(20), height);
         return result;
+    }
+
+    private static byte[] BuildImageGlb(byte[] encodedImage, string mimeType, int imageCount = 1)
+    {
+        string image = JsonSerializer.Serialize(new { bufferView = 0, mimeType });
+        string json = FormattableString.Invariant($$"""
+            {"asset":{"version":"2.0"},
+             "buffers":[{"byteLength":{{encodedImage.Length}}}],
+             "bufferViews":[{"buffer":0,"byteLength":{{encodedImage.Length}}}],
+             "images":[{{string.Join(',', Enumerable.Repeat(image, imageCount))}}],
+             "textures":[{"source":0}]}
+            """);
+        return BuildGlb(json, encodedImage);
     }
 
     internal static byte[] CreateTexturedTriangleGlb()

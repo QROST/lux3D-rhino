@@ -67,6 +67,16 @@ public sealed class TaskStore
         WriteAtomic(path, data);
         return (path, hash);
     }
+    public (string Path, string Hash) PreserveRejectedAsset(byte[] data)
+    {
+        string hash = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+        string directory = Path.Combine(Root, "rejected");
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, hash + ".glb");
+        // Quarantined bytes are never advertised as a Ready asset or passed to Rhino without validation.
+        WriteAtomic(path, data);
+        return (path, hash);
+    }
     public (string Path, string Hash) SnapshotImage(string path)
     {
         var info = new FileInfo(path);

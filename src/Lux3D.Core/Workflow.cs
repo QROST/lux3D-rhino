@@ -72,12 +72,13 @@ public sealed class Workflow
             return task with { State = "SubmissionUnknown", Error = "缺少任务编号，禁止自动重新提交。请核对原账户历史。" };
         if (task.State == "Ready" && task.AssetPath is not null && File.Exists(task.AssetPath))
         {
-            byte[] data = await File.ReadAllBytesAsync(task.AssetPath, ct).ConfigureAwait(false);
-            string hash = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+            await using var cached = File.OpenRead(task.AssetPath);
+            string hash = Convert.ToHexString(await SHA256.HashDataAsync(cached, ct).ConfigureAwait(false)).ToLowerInvariant();
             if (hash == task.AssetSha256) return task;
             task = task with { State = "Missing", Error = "资产哈希不一致，重新获取原任务结果。" };
         }
         bool succeeded = task.State is "Succeeded" or "DownloadFailed" or "Downloading";
+        byte[]? downloaded = null;
         try
         {
             RemoteTask remote = await provider.QueryAsync(task.TaskId, ct).ConfigureAwait(false);
@@ -87,13 +88,33 @@ public sealed class Workflow
             if (!succeeded) return task;
             if (remote.GlbUri is null) throw new IOException("成功任务没有 GLB 结果。");
             task = task with { State = "Downloading" }; _store.Save(task);
-            byte[] data = await provider.DownloadAsync(remote.GlbUri, ct).ConfigureAwait(false);
-            var asset = _store.StoreAsset(data);
-            task = task with { State = "Ready", AssetPath = asset.Path, AssetSha256 = asset.Hash, Error = null };
+            downloaded = await provider.DownloadAsync(remote.GlbUri, ct).ConfigureAwait(false);
+            var asset = _store.StoreAsset(downloaded);
+            task = task with { State = "Ready", AssetPath = asset.Path, AssetSha256 = asset.Hash, Error = null,
+                ValidationCode = null, RejectedAssetPath = null, RejectedAssetSha256 = null };
         }
-        catch (AssetValidationException)
+        catch (AssetValidationException ex)
         {
-            task = task with { State = "Rejected", Error = "GLB 校验失败或包含暂不支持的内容；原任务保留，不自动重新生成。" };
+            // Validator messages are local diagnostics, never provider bodies or signed URLs.
+            // Keep the exact structural validation cause; geometry counts are not rejection criteria.
+            string detail = ex.Message.Length <= 512 ? ex.Message : ex.Message[..512];
+            task = task with { State = "Rejected", AssetPath = null, AssetSha256 = null,
+                ValidationCode = ex.Code, Error = $"生成已完成，本地 GLB 校验未通过（{ex.Code}）：{detail} 可重试获取原任务，不必重新生成。" };
+            if (downloaded is not null)
+            {
+                try
+                {
+                    var rejected = _store.PreserveRejectedAsset(downloaded);
+                    task = task with { RejectedAssetPath = rejected.Path, RejectedAssetSha256 = rejected.Hash };
+                }
+                catch (Exception io) when (io is IOException or UnauthorizedAccessException)
+                { task = task with { Error = task.Error + " 未能保留诊断副本。" }; }
+            }
+        }
+        catch (OutOfMemoryException)
+        {
+            task = task with { State = succeeded ? "DownloadFailed" : "StatusUnknown",
+                Error = "当前系统内存不足，无法完成原任务结果的下载或读取；这不是模型格式无效。释放内存后可恢复原任务，无需重新生成。" };
         }
         catch (Exception)
         {
