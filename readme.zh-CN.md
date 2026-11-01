@@ -1,12 +1,42 @@
 # Lux3D for Rhino
 
+[English](readme.md) | 简体中文
+
 Rhino 8 macOS / Windows 开发候选：Manycore OAuth 登录、Lux3D 文字/单图任务、持久资产缓存、GLB 本地候选预览、参考高度/平面/旋转放置与独立 Block 导入。当前源码版本为 **0.1.3**，取消插件自定几何数量门槛，并针对生成网格的退化面/无效法线加入导入修复与诊断。跨平台实现已具备，Windows 实机验收待执行。
 
-当前验证状态详见 [docs/verification.md](docs/verification.md)。**构建通过或安装文件一致不等于真实账户及 Rhino 宿主验收通过。** OAuth 登录令牌与 REST API Key 是两种连接；当前生成适配器使用所选区域的 API Key，不把 OAuth token 当作 API Key。
+**当前版本生成模型需要所选区域的 API Key。Manycore OAuth 登录成功后仍需配置 API Key；也可以跳过插件内 OAuth 登录，直接配置 API Key。**
+
+当前验证状态详见 [docs/verification.md](docs/verification.md)。用户已反馈在 macOS Rhino 中完成 OAuth 登录、配置 API Key 并生成真实模型；修复后的导入显示、完整材质和 Undo 仍待宿主验收。构建通过或安装文件一致不等于这些项目已经通过。
+
+## OAuth 登录与生成授权
+
+官方资料复核：2026-11-01（UTC）。
+
+| 连接状态 | 当前插件能否提交生成 |
+| --- | --- |
+| 仅完成 Manycore OAuth 登录 | 不能；当前生成适配器不使用 OAuth token |
+| 仅配置有效的区域 API Key | 可以；不要求先在插件内完成 OAuth，仍受服务权限及额度约束 |
+| OAuth 和 API Key 都已配置 | 可以；生成仍通过 API Key 鉴权 |
+
+原因有两个层面：
+
+- **官方 REST 契约：** [鉴权文档](https://labs.aholo.ai/api-docs/en/authentication)要求将 API Key 直接放入 `Authorization` 请求头，不加 `Bearer` 前缀。[Lux3D OpenAPI](https://labs.aholo.ai/api-docs/specifications/services/lux3d/openapi.en.json)是生成接口契约。OAuth access token 不能直接当作此 API Key 使用。
+- **当前插件的集成范围：** 生成、远程任务查询和图片上传使用 REST/API Key。OAuth 目前用于官方浏览器授权、会话保存及只读 MCP 工具清单探测；插件未实现通过 OAuth/MCP 提交生成，也未实现 OAuth token 换取 API Key。官方公开的[本地 SDK MCP 文档](https://labs.aholo.ai/api-docs/en/mcp)同样要求 API Key；它与插件探测的远程 OAuth MCP 不是同一接入方式。
+
+官方仓库发布的[远程 MCP 连接契约](https://github.com/manycore-research/Aholo-Lux3D/blob/ac93a14bc84b501d167f907d8d4fcc22c041a88a/plugins/common/aholo-lux3d/references/mcp/connection.json)也声明使用原始区域 API Key。因此，目前不能把改走 MCP 当作已验证的免 Key 生成方案。
+
+因此，“登录成功后仍需 API Key”符合当前 REST 契约和插件实现边界，**不能据此断言 Lux3D 的所有接口都不支持 OAuth 生成**。目前没有核实到可直接替代本插件 REST 鉴权的公开 OAuth 生成契约；登录成功或读到 MCP 工具清单，也不能证明生成权限或额度。
+
+开始生成：
+
+1. 在面板“连接”页选择国际区或中国区。
+2. 从对应官方区域平台取得 API Key；国际区见 [Aholo Labs API Keys](https://labs.aholo.ai/api-keys)及[官方入门说明](https://labs.aholo.ai/api-docs/en/quickstart)。两区 Key 不互通。
+3. 在密码框输入 Key，点击“设置 API Key”，选择仅本次会话使用或保存至系统凭证存储。此验证只查询任务列表，不创建生成任务，也不检查剩余额度。
+4. 回到“生成”页提交任务。OAuth 登录为可选操作；本地 GLB 候选预览和放置不需要 OAuth 或 API Key。
 
 ## 本机安装
 
-需要 Rhino **8.32 或更新版本**、.NET 8 SDK（构建）与 .NET 8 Runtime（后台进程）。Rhino 使用 NETCore 模式；Windows 的旧 NETFramework 模式不支持本插件。[Rhino 官方运行时说明](https://www.rhino3d.com/docs/guides/netcore/)介绍了 `SetDotNetRuntime` 和重启步骤。
+需要 Rhino **8.32 或更新版本**、.NET 8 SDK（构建）、.NET 8 Runtime（后台进程）和 Python 3.9+（打包与夹具检查）。Rhino 使用 NETCore 模式；Windows 的旧 NETFramework 模式不支持本插件。[Rhino 官方运行时说明](https://www.rhino3d.com/docs/guides/netcore/)介绍了 `SetDotNetRuntime` 和重启步骤。
 
 | 平台 | 实现范围 | 当前验收状态 |
 | --- | --- | --- |
@@ -15,10 +45,9 @@ Rhino 8 macOS / Windows 开发候选：Manycore OAuth 登录、Lux3D 文字/单�
 
 以下命令构建和安装当前源码；自动安装后，由用户保存文档并重启 Rhino 加载新版本。
 
-macOS：
+macOS（在仓库目录内运行）：
 
 ```bash
-cd /Users/addincui/Github/lux3D-rhino
 bash scripts/build-package.sh
 bash scripts/install-local.sh
 ```
@@ -34,7 +63,7 @@ Windows（在仓库目录内运行 Windows PowerShell 5.1 或更新版本）：
 
 后台启动解析 `DOTNET_ROOT_<架构>`、`DOTNET_ROOT`、系统安装目录与 PATH，检查是否有 .NET 8；不依赖 Rhino GUI 继承终端环境。缺少 Runtime 会给出安装提示。路径支持空格与非 ASCII 字符。
 
-## Manycore 登录
+## Manycore OAuth 登录（可选）
 
 在“连接”页选择国际区或中国区，点击“Manycore OAuth 登录”，在系统浏览器完成官方授权。插件使用官方资源/授权服务器发现、动态公开客户端注册、PKCE S256、随机 state 与本机 loopback 回调。账号密码只在官方页面输入。
 
@@ -46,7 +75,7 @@ macOS 令牌存入产品独立的 Keychain 条目；Windows 使用当前用户�
 dotnet src/Lux3D.Sidecar/bin/Release/net8.0/Lux3D.Sidecar.dll --oauth-login global
 ```
 
-官方 OAuth 元数据当前只声明 `get_user_info` scope，MCP 接口返回 Bearer challenge。当前不声称已验证 OAuth 可以替代 REST API Key 发起生成。请在相应官方区域平台取得 API Key，在面板密码框输入并“设置 API Key”；验证只查询任务历史，不消费生成额度。可选择仅会话或系统凭证存储。
+官方 OAuth 元数据目前只声明 `get_user_info` scope；该声明本身不能证明远程 MCP 可用的生成能力。登录后的自动探测只初始化 MCP 并读取工具清单，不调用生成工具。详细发现端点、鉴权区别和验证边界见 [provider-contract.md](docs/provider-contract.md)。
 
 ## 生成与候选
 
@@ -62,13 +91,13 @@ dotnet src/Lux3D.Sidecar/bin/Release/net8.0/Lux3D.Sidecar.dll --oauth-login glob
 
 ## 用户手动执行宿主自测
 
-请在 Rhino 命令栏运行（只创建独立测试文档，不导入当前用户文档）：
+请在 Rhino 命令栏运行（只创建独立测试文档，不导入当前用户文档）。将下列绝对路径替换为本机仓库及输出目录；Windows 示例可使用 `C:/path/to/lux3D-rhino/...`：
 
 ```text
-Lux3DSelfTest "/Users/addincui/Github/lux3D-rhino/fixtures/asymmetric-pbr.glb" "/Users/addincui/Github/lux3D-rhino/artifacts/rhino-selftest"
+Lux3DSelfTest "/path/to/lux3D-rhino/fixtures/asymmetric-pbr.glb" "/path/to/lux3D-rhino/artifacts/rhino-selftest"
 ```
 
-自测报告和 `.3dm` 写入新的 run 目录，包含加载环境、尺度/平面、候选、Block、重放、Undo/Redo、保存重开结果。真实 PBR 视觉、实际重启后重开、账户登录与收费生成仍需真人参与验收。
+自测报告和 `.3dm` 写入新的 run 目录，包含加载环境、尺度/平面、候选、Block、重放、Undo/Redo、保存重开结果。真实 PBR 视觉、实际重启后重开、账户登录与收费生成需真人参与验收；已报告的 macOS OAuth/API Key 生成成功不代表全部平台和链路都已通过。
 
 ## 数据与开发
 
@@ -80,4 +109,4 @@ dotnet test Lux3D.Rhino.sln -c Release --no-build
 python3 scripts/create-fixtures.py --check
 ```
 
-原始产品验收基线保存在 `PRD.md`，未改写为“已完成”。来源及架构见 `NOTICE`、`docs/architecture.md` 与 `docs/provider-contract.md`。
+原始产品验收基线保存在 [PRD.md](PRD.md)，未改写为“已完成”。来源及架构见 [NOTICE](NOTICE)、[architecture.md](docs/architecture.md) 与 [provider-contract.md](docs/provider-contract.md)。两份 README 保持同等范围；当前插件界面和详细开发文档主要为中文。

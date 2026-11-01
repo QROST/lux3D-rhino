@@ -2,6 +2,16 @@
 
 核实日期：2026-10-31（America/Los_Angeles）。本文件区分公开契约、离线测试和需要用户完成的真实登录/生成验收。
 
+## 当前鉴权结论（2026-11-01 UTC 复核）
+
+用户已反馈在 macOS Rhino 中完成 OAuth 登录、配置 API Key 并成功生成真实模型。当前插件生成与远程任务查询只调用 `RestGenerationProvider`，使用所选区域的 API Key；OAuth 不是生成的前置步骤。设置 API Key 的任务列表查询只验证连接，不检查剩余额度。
+
+[官方鉴权文档](https://labs.aholo.ai/api-docs/en/authentication)和 [Lux3D OpenAPI](https://labs.aholo.ai/api-docs/specifications/services/lux3d/openapi.en.json)继续要求原始 API Key 放入 `Authorization`，不加 `Bearer`。官方[本地 SDK MCP 文档](https://labs.aholo.ai/api-docs/en/mcp)也要求 API Key；不要将该本地 stdio 服务与下文远程 OAuth MCP 探测混为一谈。
+
+官方仓库的[远程 MCP 连接契约](https://github.com/manycore-research/Aholo-Lux3D/blob/ac93a14bc84b501d167f907d8d4fcc22c041a88a/plugins/common/aholo-lux3d/references/mcp/connection.json)同样声明 `type=api-key`、`header=Authorization`、`prefix=""`，分别绑定两区 `/lux3d-mcp/mcp`。因此不能把远程接口的 Bearer discovery challenge 解读为已经验证的免 API Key 生成路线。
+
+本插件没有 OAuth/MCP 生成适配器，也没有 OAuth token 换取 API Key 的实现。尚未核实到可以替代本插件 REST 鉴权的公开 OAuth 生成契约；这不是“所有 Lux3D 接口都不支持 OAuth 生成”的证据。OAuth metadata 中的 scope 声明、Bearer challenge、登录成功或工具清单可读，都不能单独证明生成权限和额度。下文保留发现与实现细节，逐项真实验收状态以 [verification.md](verification.md) 为准；用户报告的登录成功不等于 refresh、MCP 权限和所有平台均已验收。
+
 ## 已核实的 OAuth
 
 官方公共 JSON 发现端点已通过真实、无认证 HTTPS GET 核实；普通网页搜索工具无法读取这些端点不代表服务不存在。
@@ -78,7 +88,7 @@ Windows 的 `WindowsDpapiCredentialStore` 使用 [Microsoft DPAPI](https://learn
 
 离线测试覆盖 regional routing、raw API key、精确 Int64、G1 条件字段、创建未知状态/禁止重试、task ID 校验、未知状态、结果选择、分片和凭证隔离、PKCE/state/replay/重复参数/拒绝授权、issuer pinning、token JSON roundtrip 和稳定连接标识。
 
-尚需真实验证：授权回调、用户 token exchange/refresh、Keychain 用户访问提示、Windows DPAPI 保存/读取/删除、MCP token 权限及账户查询、真实区域单图/文字创建与下载、服务器分片行为。真实 DCR 已单独通过，详见验证记录；本轮适配按用户要求推迟测试，未调用付费生成。
+历史适配阶段按用户要求推迟了真实测试，未调用付费生成；后续用户已完成 macOS OAuth 登录和 API Key 生成，见上方当前结论及验证记录。仍需逐项真实验证：OAuth refresh、Keychain 用户访问提示与重启恢复、Windows DPAPI 保存/读取/删除、MCP token 权限及账户查询、各区域单图/文字完整链路及服务器分片行为。单次用户成功反馈不代表这些项目全部通过。
 
 ## OAuth MCP 只读探测
 

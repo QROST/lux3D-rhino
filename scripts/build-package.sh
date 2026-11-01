@@ -37,7 +37,7 @@ cp -R src/Lux3D.Sidecar/bin/Release/net8.0/. "$STAGE/sidecar/"
 # A previous RID build can leave an apphost behind. Only remove these copies in the new staging directory.
 rm -f "$STAGE/sidecar/Lux3D.Sidecar" "$STAGE/sidecar/Lux3D.Sidecar.exe"
 cp packaging/manifest.yml "$STAGE/"
-cp LICENSE NOTICE README.md "$STAGE/"
+cp LICENSE NOTICE readme.md readme.zh-CN.md "$STAGE/"
 cp -R docs "$STAGE/"
 cp fixtures/*.glb fixtures/manifest.json fixtures/README.md "$STAGE/fixtures/"
 (cd "$STAGE" && "$YAK" build --platform mac)

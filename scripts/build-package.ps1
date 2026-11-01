@@ -44,7 +44,7 @@ try {
         if (Test-Path -LiteralPath $staleHost -PathType Leaf) { Remove-Item -LiteralPath $staleHost }
     }
     Copy-Item -LiteralPath 'packaging\manifest.yml' -Destination $stage
-    Copy-Item -LiteralPath @('LICENSE', 'NOTICE', 'README.md') -Destination $stage
+    Copy-Item -LiteralPath @('LICENSE', 'NOTICE', 'readme.md', 'readme.zh-CN.md') -Destination $stage
     Copy-Item -LiteralPath 'docs' -Destination $stage -Recurse
     $fixtureStage = Join-Path $stage 'fixtures'
     [void][IO.Directory]::CreateDirectory($fixtureStage)
