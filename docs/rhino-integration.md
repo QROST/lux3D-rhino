@@ -4,7 +4,7 @@
 
 ## 身份与宿主
 
-- Rhino 8，`net7.0`；编译引用 `RhinoCommon 8.32.26160.13001`，宿主提供 RhinoCommon/Eto，不随插件分发它们。
+- Rhino 8.32 或更新版本，macOS / Windows x64，`net7.0`；编译引用 `RhinoCommon 8.32.26160.13001`，宿主提供 RhinoCommon/Eto，不随插件分发它们。Windows 要求 NETCore 模式，旧 NETFramework 模式无法加载本程序集；参见 [官方运行时说明](https://www.rhino3d.com/docs/guides/netcore/)。
 - 插件/assembly GUID：`B8B147EC-5732-4FB9-BA40-C5BB8D36C2AB`。
 - 面板 GUID：`AC141E4E-8B0E-4A82-A34A-F2B0783201FB`。
 - 主命令：`Lux3DPanel`；离线自测命令：`Lux3DSelfTest`。
@@ -43,7 +43,7 @@ GLB 在独立 headless RhinoDoc 中由 Rhino 原生 importer 解码。准备阶�
 
 ## 用户在 Rhino 中运行离线自测
 
-加载候选插件后，输入以下命令（完整绝对路径；第二个参数是允许创建证据的目录）：
+以下为后续验收步骤，本轮按用户要求未执行。加载候选插件后，输入以下命令（完整绝对路径；第二个参数是允许创建证据的目录）：
 
 ```text
 Lux3DSelfTest "/Users/addincui/Github/lux3D-rhino/fixtures/asymmetric-pbr.glb" "/tmp/lux3d-rhino-evidence"
@@ -53,6 +53,12 @@ Lux3DSelfTest "/Users/addincui/Github/lux3D-rhino/fixtures/asymmetric-pbr.glb" "
 
 ```text
 Lux3DSelfTest "/Users/addincui/Github/lux3D-rhino/fixtures/asymmetric-geometry.glb" "/tmp/lux3d-rhino-evidence"
+```
+
+Windows 使用对应的绝对路径，例如（请替换为实际仓库位置）：
+
+```text
+Lux3DSelfTest "C:\work\lux3D-rhino\fixtures\asymmetric-pbr.glb" "C:\work\lux3D-rhino\artifacts\rhino-selftest"
 ```
 
 每次新建 `lux3d-<timestamp>-<random>/`，不覆盖已有文件，不修改用户当前文档。里面有 `report.json`、米/毫米测试 `.3dm` 及复制重开样本。命令只接受固定 SHA-256 的仓库夹具；不使用凭证、不联网、不创建付费任务。

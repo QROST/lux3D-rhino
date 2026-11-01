@@ -1,12 +1,21 @@
 # Lux3D for Rhino
 
-Rhino 8 macOS 开发候选：Manycore OAuth 登录、Lux3D 文字/单图任务、持久资产缓存、GLB 本地候选预览、参考高度/平面/旋转放置与独立 Block 导入。
+Rhino 8 macOS / Windows 开发候选：Manycore OAuth 登录、Lux3D 文字/单图任务、持久资产缓存、GLB 本地候选预览、参考高度/平面/旋转放置与独立 Block 导入。当前源码版本为 **0.1.1**；跨平台适配已实现，实际双平台测试按用户要求后续执行。
 
 当前验证状态详见 [docs/verification.md](docs/verification.md)。**构建通过或安装文件一致不等于真实账户及 Rhino 宿主验收通过。** OAuth 登录令牌与 REST API Key 是两种连接；当前生成适配器使用所选区域的 API Key，不把 OAuth token 当作 API Key。
 
 ## 本机安装
 
-需要 Rhino 8、.NET 8 SDK（构建）与 .NET 8 Runtime（后台进程）。当前本机已具备。此包仅标记 macOS；未验证 Windows。
+需要 Rhino **8.32 或更新版本**、.NET 8 SDK（构建）与 .NET 8 Runtime（后台进程）。Rhino 使用 NETCore 模式；Windows 的旧 NETFramework 模式不支持本插件。[Rhino 官方运行时说明](https://www.rhino3d.com/docs/guides/netcore/)介绍了 `SetDotNetRuntime` 和重启步骤。
+
+| 平台 | 实现范围 | 当前验收状态 |
+| --- | --- | --- |
+| macOS，Apple Silicon / Intel | Keychain、系统浏览器 OAuth、Mac Yak 构建安装 | 0.1.0 已在本机安装；0.1.1 宿主测试待执行 |
+| Windows x64 | 用户 DPAPI 凭证加密、系统浏览器 OAuth、PowerShell Yak 构建安装 | 代码适配完成；Windows 构建、安装与宿主测试待执行 |
+
+以下命令用于之后构建和安装；本轮没有安装 0.1.1，也没有操作 Rhino。
+
+macOS：
 
 ```bash
 cd /Users/addincui/Github/lux3D-rhino
@@ -14,13 +23,22 @@ bash scripts/build-package.sh
 bash scripts/install-local.sh
 ```
 
-安装脚本校验包哈希，通过 Rhino 自带 Yak 安装到独立的 `lux3d-rhino/0.1.0`，再逐文件比对。它不发布包，不更改 Tripo 安装，不打开/关闭或操作 Rhino。请自行打开或重启 Rhino，运行 `Lux3DPanel`。
+Windows（在仓库目录内运行 Windows PowerShell 5.1 或更新版本）：
+
+```powershell
+.\scripts\build-package.ps1
+.\scripts\install-local.ps1
+```
+
+构建脚本默认执行离线测试；仅准备未测试候选可分别使用 `--skip-tests` / `-SkipTests`。两平台生成各自的 `mac` / `win` Yak 包，安装脚本检查平台、版本及包哈希，再逐文件比对。包安装到独立的 `lux3d-rhino/<版本>` 目录，不发布至包服务器。用户自行打开或重启 Rhino，运行 `Lux3DPanel`。
+
+后台启动解析 `DOTNET_ROOT_<架构>`、`DOTNET_ROOT`、系统安装目录与 PATH，检查是否有 .NET 8；不依赖 Rhino GUI 继承终端环境。缺少 Runtime 会给出安装提示。路径支持空格与非 ASCII 字符。
 
 ## Manycore 登录
 
 在“连接”页选择国际区或中国区，点击“Manycore OAuth 登录”，在系统浏览器完成官方授权。插件使用官方资源/授权服务器发现、动态公开客户端注册、PKCE S256、随机 state 与本机 loopback 回调。账号密码只在官方页面输入。
 
-令牌存入产品独立的 macOS 钥匙串条目；不进入 `.3dm`、任务历史、明文配置或日志。断开清除本机凭证，官方远程授权应在账户网站管理。登录失败、取消或超时不创建生成任务。
+macOS 令牌存入产品独立的 Keychain 条目；Windows 使用当前用户的 DPAPI 加密后写入受限访问目录，支持较长的 OAuth 会话，不受 Credential Manager 单条凭证大小限制。凭证不进入 `.3dm`、任务历史、明文配置或日志。断开清除本机凭证，官方远程授权应在账户网站管理。登录失败、取消或超时不创建生成任务。
 
 开发时可用纯命令行开始登录，终端只打印授权链接和脱敏结果，由用户手动打开链接：
 
@@ -28,7 +46,7 @@ bash scripts/install-local.sh
 dotnet src/Lux3D.Sidecar/bin/Release/net8.0/Lux3D.Sidecar.dll --oauth-login global
 ```
 
-官方 OAuth 元数据当前只声明 `get_user_info` scope，MCP 接口返回 Bearer challenge。当前不声称已验证 OAuth 可以替代 REST API Key 发起生成。请在相应官方区域平台取得 API Key，在面板密码框输入并“设置 API Key”；验证只查询任务历史，不消费生成额度。可选择仅会话或钥匙串保存。
+官方 OAuth 元数据当前只声明 `get_user_info` scope，MCP 接口返回 Bearer challenge。当前不声称已验证 OAuth 可以替代 REST API Key 发起生成。请在相应官方区域平台取得 API Key，在面板密码框输入并“设置 API Key”；验证只查询任务历史，不消费生成额度。可选择仅会话或系统凭证存储。
 
 ## 生成与候选
 
@@ -50,7 +68,7 @@ Lux3DSelfTest "/Users/addincui/Github/lux3D-rhino/fixtures/asymmetric-pbr.glb" "
 
 ## 数据与开发
 
-后台状态位于 .NET `LocalApplicationData/Lux3D-Rhino`；本机实测为 `~/Library/Application Support/Lux3D-Rhino`。`tasks/` 不含凭证，`inputs/` 保存提交图片快照，`assets/` 保存 SHA-256 命名的不可变 GLB。没有自动上传遥测或清理缓存。
+后台状态位于 .NET `LocalApplicationData/Lux3D-Rhino`；macOS 本机实测为 `~/Library/Application Support/Lux3D-Rhino`，Windows 对应 `%LOCALAPPDATA%\Lux3D-Rhino`。`tasks/` 不含凭证，`inputs/` 保存提交图片快照，`assets/` 保存 SHA-256 命名的不可变 GLB。没有自动上传遥测或清理缓存。
 
 ```bash
 dotnet build Lux3D.Rhino.sln -c Release

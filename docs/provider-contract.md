@@ -70,11 +70,15 @@ OAuth 对应的远程 MCP：
 
 ## 凭证和验证边界
 
-`MacKeychainCredentialStore` 直接 P/Invoke Security.framework generic-password API，service=`ai.aholo.lux3d.rhino`。API key / OAuth session 保存到 macOS 钥匙串，不通过 `security -w` 命令参数，不写普通配置文件。退出登录删除所选账户的本地凭证；没有证据支持的 revoke endpoint 不会凭空调用。
+`CredentialStoreFactory.CreateDefault()` 按当前 OS 选择存储。macOS 的 `MacKeychainCredentialStore` 直接 P/Invoke Security.framework generic-password API，service=`ai.aholo.lux3d.rhino`。API key / OAuth session 保存到 macOS 钥匙串，不通过 `security -w` 命令参数，不写普通配置文件。
+
+Windows 的 `WindowsDpapiCredentialStore` 使用 [Microsoft DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata) 的当前用户保护，不使用 `CRYPTPROTECT_LOCAL_MACHINE`，不依赖 Credential Manager 的小型 blob 容量。密文位于 `%LOCALAPPDATA%\Lux3D Rhino\Credentials\<service SHA-256>\<account SHA-256>.dpapi`；新建目录和文件仅授予当前用户及 SYSTEM 权限。完整 UTF-8 凭证上限 1 MiB，超限报错而不截断。服务/账户作为额外熵绑定，写入使用同目录临时密文、flush 和原子替换，明文不会落盘。需要本地、支持持久 ACL 的正常用户目录；网络重定向和 reparse 路径明确拒绝。凭证不能作为可迁移配置复制到另一 Windows 用户使用；同一用户进程或管理员不属于该保护边界。Windows 原生调用尚待实机验证。
+
+退出登录删除所选账户的本地凭证；没有证据支持的 revoke endpoint 不会凭空调用。
 
 离线测试覆盖 regional routing、raw API key、精确 Int64、G1 条件字段、创建未知状态/禁止重试、task ID 校验、未知状态、结果选择、分片和凭证隔离、PKCE/state/replay/重复参数/拒绝授权、issuer pinning、token JSON roundtrip 和稳定连接标识。
 
-尚需真实验证：DCR 与授权回调、用户 token exchange/refresh、Keychain 用户访问提示、MCP token权限及账户查询、真实区域单图/文字创建与下载、服务器分片行为。开发验证未调用付费生成。
+尚需真实验证：授权回调、用户 token exchange/refresh、Keychain 用户访问提示、Windows DPAPI 保存/读取/删除、MCP token 权限及账户查询、真实区域单图/文字创建与下载、服务器分片行为。真实 DCR 已单独通过，详见验证记录；本轮适配按用户要求推迟测试，未调用付费生成。
 
 ## OAuth MCP 只读探测
 
@@ -82,6 +86,6 @@ OAuth 对应的远程 MCP：
 
 实现依据 [MCP Streamable HTTP 规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) 与 [生命周期规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)：协商协议版本后发送 `MCP-Protocol-Version`，保留服务返回的 `Mcp-Session-Id`，同时接受 JSON/SSE。单响应最多 2 MiB，最多 20 页/1000 个工具，45 秒超时；仅返回工具名称，服务器说明/指令不作为本地指令执行。`Available=true` 只证明可访问工具清单，不能证明生成权限、额度或已验收付费操作。
 
-OAuth 回调浏览器页面只确认“已收到授权回调”，最终登录成功以 token exchange、Keychain 保存和宿主结果为准。refresh 返回的 token type、scope、有效期、refresh token 长度/字符类型被验证；回调拒绝畸形 percent 编码、控制字符、路径变化和重复参数。
+OAuth 回调浏览器页面只确认“已收到授权回调”，最终登录成功以 token exchange、平台凭证保存和宿主结果为准。refresh 返回的 token type、scope、有效期、refresh token 长度/字符类型被验证；回调拒绝畸形 percent 编码、控制字符、路径变化和重复参数。
 
 当已验证的任务 `status=3` 但输出为空、只有 ZIP 或无法解析时，Provider 返回 `State="succeeded"`、`GlbUri=null` 和脱敏 `OutputError`；不再把输出解析异常当作查询失败。上层据此记录 `DownloadFailed`，保留远端成功事实与原 task ID，不重复生成。
