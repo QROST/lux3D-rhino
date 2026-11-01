@@ -1,0 +1,63 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{B826863C-B96C-42F0-976A-F339ED0D3B6B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lux3D.Core", "src\Lux3D.Core\Lux3D.Core.csproj", "{9D3E187D-FA26-4FBE-8DBF-A241A15679E3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lux3D.Provider", "src\Lux3D.Provider\Lux3D.Provider.csproj", "{1DFE58D5-C48B-4C24-B115-08FE3AF64EFB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lux3D.Sidecar", "src\Lux3D.Sidecar\Lux3D.Sidecar.csproj", "{C6FDBECB-5D74-495A-B451-948BCA1A2974}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lux3D.Rhino", "src\Lux3D.Rhino\Lux3D.Rhino.csproj", "{C7A2FCFD-46E8-4FFF-AA85-7071BB9251A5}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0ACC489D-2F23-4979-A0E0-EBD5388163F2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lux3D.Core.Tests", "tests\Lux3D.Core.Tests\Lux3D.Core.Tests.csproj", "{CA79C990-4936-4C93-ACF9-A373CA17767C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lux3D.Provider.Tests", "tests\Lux3D.Provider.Tests\Lux3D.Provider.Tests.csproj", "{A57516C3-49C5-4DE5-866D-9BFD90F3D9AD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{9D3E187D-FA26-4FBE-8DBF-A241A15679E3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9D3E187D-FA26-4FBE-8DBF-A241A15679E3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9D3E187D-FA26-4FBE-8DBF-A241A15679E3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9D3E187D-FA26-4FBE-8DBF-A241A15679E3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1DFE58D5-C48B-4C24-B115-08FE3AF64EFB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1DFE58D5-C48B-4C24-B115-08FE3AF64EFB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1DFE58D5-C48B-4C24-B115-08FE3AF64EFB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1DFE58D5-C48B-4C24-B115-08FE3AF64EFB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C6FDBECB-5D74-495A-B451-948BCA1A2974}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C6FDBECB-5D74-495A-B451-948BCA1A2974}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C6FDBECB-5D74-495A-B451-948BCA1A2974}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C6FDBECB-5D74-495A-B451-948BCA1A2974}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C7A2FCFD-46E8-4FFF-AA85-7071BB9251A5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C7A2FCFD-46E8-4FFF-AA85-7071BB9251A5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C7A2FCFD-46E8-4FFF-AA85-7071BB9251A5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C7A2FCFD-46E8-4FFF-AA85-7071BB9251A5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CA79C990-4936-4C93-ACF9-A373CA17767C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CA79C990-4936-4C93-ACF9-A373CA17767C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CA79C990-4936-4C93-ACF9-A373CA17767C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CA79C990-4936-4C93-ACF9-A373CA17767C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A57516C3-49C5-4DE5-866D-9BFD90F3D9AD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A57516C3-49C5-4DE5-866D-9BFD90F3D9AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A57516C3-49C5-4DE5-866D-9BFD90F3D9AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A57516C3-49C5-4DE5-866D-9BFD90F3D9AD}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{9D3E187D-FA26-4FBE-8DBF-A241A15679E3} = {B826863C-B96C-42F0-976A-F339ED0D3B6B}
+		{1DFE58D5-C48B-4C24-B115-08FE3AF64EFB} = {B826863C-B96C-42F0-976A-F339ED0D3B6B}
+		{C6FDBECB-5D74-495A-B451-948BCA1A2974} = {B826863C-B96C-42F0-976A-F339ED0D3B6B}
+		{C7A2FCFD-46E8-4FFF-AA85-7071BB9251A5} = {B826863C-B96C-42F0-976A-F339ED0D3B6B}
+		{CA79C990-4936-4C93-ACF9-A373CA17767C} = {0ACC489D-2F23-4979-A0E0-EBD5388163F2}
+		{A57516C3-49C5-4DE5-866D-9BFD90F3D9AD} = {0ACC489D-2F23-4979-A0E0-EBD5388163F2}
+	EndGlobalSection
+EndGlobal

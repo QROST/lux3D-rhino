@@ -1,0 +1,13 @@
+name: lux3d-rhino
+version: 0.1.0
+authors:
+  - QROST
+description: >
+  Lux3D for Rhino preview. Manycore OAuth login, regional API-key generation,
+  local GLB candidates and placement. macOS candidate; real account and host
+  acceptance are recorded separately.
+keywords:
+  - B8B147EC-5732-4FB9-BA40-C5BB8D36C2AB
+  - lux3d
+  - aholo
+  - manycore

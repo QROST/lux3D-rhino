@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "units": "meters",
+  "upAxis": "Y",
+  "localBounds": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      2,
+      3,
+      1
+    ]
+  },
+  "worldBounds": {
+    "min": [
+      11,
+      22,
+      29
+    ],
+    "max": [
+      11.5,
+      25,
+      33
+    ]
+  },
+  "accessorVertexCount": 18,
+  "triangleCount": 8,
+  "meshCount": 1,
+  "primitiveCount": 1,
+  "nodeCount": 2,
+  "assets": [
+    {
+      "file": "asymmetric-pbr.glb",
+      "sha256": "54b0beb3e3248667cd24aa3afc97373b94cb22ac4101fb2663ffc414f1fc8382",
+      "byteLength": 3492,
+      "materialCount": 1,
+      "embeddedImageCount": 3
+    },
+    {
+      "file": "asymmetric-geometry.glb",
+      "sha256": "97d19134ec64335bd18bf634092d7af21d4e6de3554a85683f294c97dc7ba131",
+      "byteLength": 2192,
+      "materialCount": 0,
+      "embeddedImageCount": 0
+    }
+  ]
+}

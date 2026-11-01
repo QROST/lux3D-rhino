@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net7.0</TargetFramework>
+    <AssemblyName>Lux3D.Rhino</AssemblyName>
+    <RootNamespace>Lux3D.Rhino</RootNamespace>
+    <TargetExt>.rhp</TargetExt>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="RhinoCommon" IncludeAssets="compile;build" PrivateAssets="all" />
+    <ProjectReference Include="../Lux3D.Core/Lux3D.Core.csproj" />
+  </ItemGroup>
+</Project>
