@@ -2,13 +2,13 @@
 
 [English](readme.md) | 简体中文
 
-由 **CuriousArc · qrost** 开发的独立 Rhino 集成，非 Manycore、Aholo 或 McNeel 官方产品。支持 Manycore OAuth 登录、Lux3D 文字/单图任务、持久资产缓存、GLB 候选预览和独立 Block 放置。当前版本为 **0.1.4-beta.3**；本次 Yak 发行目标为 **macOS / Rhino 8.32+**。Windows 适配代码和构建入口已具备，实机验收及公开发行包待完成。
+由 **CuriousArc · qrost** 开发的独立 Rhino 集成，非 Manycore、Aholo 或 McNeel 官方产品。支持 Manycore OAuth 登录、Lux3D 文字/单图任务、持久资产缓存、GLB 候选预览和独立 Block 放置。当前版本为 **0.1.4-beta.4**；本次 Yak 发行目标为 **macOS / Rhino 8.32+**。Windows 适配代码和构建入口已具备，实机验收及公开发行包待完成。
 界面默认使用英文。插件加载时优先读取 Rhino 界面语言；中文语言环境（含繁体中文区域）显示简体中文。无法取得 Rhino 语言时再读取系统界面语言，其他或未知语言使用英文。修改 Rhino 语言后请重启 Rhino。此规则也覆盖私有后台进程与 OAuth 回调页面；用户提示词、模型名称和存储标识不会翻译。数字格式保留用户区域设置。读取旧任务记录时会翻译已知的完整诊断消息；动态旧记录和无法识别的提供方消息保留原文。
 
 
 **当前版本生成模型需要所选区域的 API Key。Manycore OAuth 登录成功后仍需配置 API Key；也可以跳过插件内 OAuth 登录，直接配置 API Key。**
 
-当前验证状态详见 [docs/verification.md](docs/verification.md)。用户已确认 macOS 上 0.1.3 的 OAuth 登录、API Key 生成及佛像模型放入后正常显示。0.1.4-beta.3 的新界面和预览交互、完整 PBR、Undo/Redo、保存重开及 Windows 实机仍待专项验收；已有版本的成功不替代新改动的验收。
+当前验证状态详见 [docs/verification.md](docs/verification.md)。用户已确认 macOS 上 0.1.3 的 OAuth 登录、API Key 生成及佛像模型放入后正常显示。0.1.4-beta.4 的语言选择与排版、界面和预览交互、完整 PBR、Undo/Redo、保存重开及 Windows 实机仍待专项验收；已有版本的成功不替代新改动的验收。
 
 ## 本次预览版
 
@@ -19,7 +19,7 @@
 - 同一候选调整尺寸或角度时复用网格和材质，连续输入合并刷新；没有新增几何数量门槛或自动减面。
 - 直接放置时，文件读取、结构校验和快照准备在后台执行；Rhino 原生预检和正式导入仍在主线程运行，期间界面可能短暂等待。诊断报告包含分阶段单调计时，尚未宣称具体提速倍数。
 
-Yak 包名为 `lux3d-rhino`，版本为 `0.1.4-beta.3`。在 macOS Rhino 中运行 `PackageManager`、启用预发行版本显示后选择该版本；安装后保存文档并重启 Rhino。仍需 .NET 8 Runtime 和区域 API Key。也可按下方步骤从源码构建本地候选；是否已上传以 [验证记录](docs/verification.md)及 Yak 服务器为准。
+Yak 包名为 `lux3d-rhino`，版本为 `0.1.4-beta.4`。在 macOS Rhino 中运行 `PackageManager`、启用预发行版本显示后选择该版本；安装后保存文档并重启 Rhino。仍需 .NET 8 Runtime 和区域 API Key。也可按下方步骤从源码构建本地候选；是否已上传以 [验证记录](docs/verification.md)及 Yak 服务器为准。
 
 ## OAuth 登录与生成授权
 
@@ -122,4 +122,4 @@ dotnet test Lux3D.Rhino.sln -c Release --no-build
 python3 scripts/create-fixtures.py --check
 ```
 
-原始产品验收基线保存在 [PRD.md](PRD.md)，未改写为“已完成”。来源及架构见 [NOTICE](NOTICE)、[architecture.md](docs/architecture.md) 与 [provider-contract.md](docs/provider-contract.md)。两份 README 保持同等范围；当前插件界面和详细开发文档主要为中文。
+原始产品验收基线保存在 [PRD.md](PRD.md)，未改写为“已完成”。来源及架构见 [NOTICE](NOTICE)、[architecture.md](docs/architecture.md) 与 [provider-contract.md](docs/provider-contract.md)。两份 README 保持同等范围；插件界面默认英文，并按上述规则支持简体中文；详细开发文档主要为中文。

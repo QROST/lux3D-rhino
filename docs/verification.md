@@ -154,3 +154,12 @@ beta.3 本轮交付记录：
 - Release 构建 0 warning / 0 error，Core **102/102**、Provider **39/39**，共 **141/141** 测试通过；两个夹具再生检查通过。
 - 最终包 `lux3d-rhino-0.1.4-beta.3-rh8_32-mac.yak`，大小 **2,498,294 字节**，SHA-256 `2fc0e1644b6ec68d05dbd9ff7ce5ad13c88fa776e0d61a237bac46c1655a4746`。本机安装成功，**27/27** 文件匹配；已安装 RHP 的发布者为 `CuriousArc`，说明署名为 `CuriousArc and qrost`，GUID 未变。
 - **Yak 发布尚未完成**：两次上传均返回服务器 HTTP 500；每次失败后独立查询公开版本接口，均只有 beta.1/beta.2，没有 beta.3。因此不能把本机安装成功视为公开发行成功。证据位于 `artifacts/yak-publication-beta3/`。本轮未推送 GitHub 源码，公开文档需后续同步。
+
+
+## 2026-11-06 English/Chinese UI release candidate (0.1.4-beta.4)
+
+This macOS / Rhino 8.32+ preview includes the language-selection implementation from `fdc3598`: English is the default; a valid Rhino UI language takes precedence, with system UI language as the fallback. Chinese locales use Simplified Chinese. The host, private background process and OAuth callback page use the selected language. Numeric formatting keeps the user's regional settings. Restart Rhino after changing its UI language. Native language/layout acceptance remains pending; existing macOS placement feedback does not establish acceptance of this change.
+
+The preceding implementation checks passed: Release build with **0 warnings / 0 errors**, Core **123/123** and Provider **39/39** offline tests. English, Simplified Chinese and Traditional Chinese sidecar locale cases produced the expected translated offline error responses. These checks did not use real credentials, call generation services or control Rhino. The final package build will rerun the automated checks; installation and Yak publication results will be recorded separately after completion.
+
+This release retains **CuriousArc / qrost** attribution. A regional API Key is still required for generation; optional Manycore OAuth sign-in does not replace it. Full PBR, Undo/Redo, save/reopen and Windows host acceptance remain pending. No Windows distribution is included in this release. The official Yak search on 2026-11-06 returned beta.1 and beta.2; beta.4 was unused, and beta.3 remains a historical local-only package.

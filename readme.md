@@ -2,13 +2,13 @@
 
 English | [简体中文](readme.zh-CN.md)
 
-An independent Rhino integration by **CuriousArc · qrost**, not an official Manycore, Aholo, or McNeel product. Features include Manycore OAuth sign-in, Lux3D text/single-image generation, persistent asset caching, GLB candidate previews, and independent Block placement. The current version is **0.1.4-beta.3**. This Yak distribution targets **macOS / Rhino 8.32+**. Windows implementation and build scripts are present; host acceptance and a public Windows distribution remain pending.
+An independent Rhino integration by **CuriousArc · qrost**, not an official Manycore, Aholo, or McNeel product. Features include Manycore OAuth sign-in, Lux3D text/single-image generation, persistent asset caching, GLB candidate previews, and independent Block placement. The current version is **0.1.4-beta.4**. This Yak distribution targets **macOS / Rhino 8.32+**. Windows implementation and build scripts are present; host acceptance and a public Windows distribution remain pending.
 The interface uses English by default. At plugin load, Rhino’s UI language takes precedence over the system UI language; Chinese locales (including Traditional Chinese locales) use the Simplified Chinese translation. If Rhino cannot report its language, the system UI language is used, with English for other or unknown languages. Restart Rhino after changing its language. This includes the private background process and OAuth callback page; prompts, model names and saved identifiers are not translated. Numeric formatting keeps the user’s regional settings. Known complete diagnostic messages from older task records are localized when read; dynamic legacy diagnostics and unrecognized provider messages retain their original text.
 
 
 **Generating models in this version requires an API Key for the selected region. Signing in with Manycore OAuth does not remove that requirement. You can also skip OAuth sign-in in the plugin and configure an API Key directly.**
 
-See [verification records](docs/verification.md) for the current status. The user has confirmed OAuth sign-in, API Key generation, and successful placement/display of the Buddha model with version 0.1.3 on macOS. The new 0.1.4-beta.3 UI and preview interactions, full PBR, Undo/Redo, save/reopen behavior, and Windows host acceptance still require focused verification. Success with an earlier version does not establish acceptance of new changes.
+See [verification records](docs/verification.md) for the current status. The user has confirmed OAuth sign-in, API Key generation, and successful placement/display of the Buddha model with version 0.1.3 on macOS. The 0.1.4-beta.4 language selection and layout, UI and preview interactions, full PBR, Undo/Redo, save/reopen behavior, and Windows host acceptance still require focused verification. Success with an earlier version does not establish acceptance of new changes.
 
 ## This preview release
 
@@ -19,7 +19,7 @@ See [verification records](docs/verification.md) for the current status. The use
 - Size and angle changes reuse the current candidate's meshes and materials, with rapid input changes coalesced. There are no new geometry count limits or automatic decimation.
 - Direct placement reads, validates, and snapshots files in the background. Native Rhino preflight and final import still run on the UI thread and may briefly block interaction. Diagnostics include monotonic stage timings; no measured speedup factor is claimed yet.
 
-The Yak package name is `lux3d-rhino`, version `0.1.4-beta.3`. In Rhino for macOS, run `PackageManager`, enable prerelease versions, and select this version. Save your documents and restart Rhino after installation. The .NET 8 Runtime and a regional API Key are still required. You can also build a local candidate from source using the steps below; consult the [verification records](docs/verification.md) and Yak server for upload status.
+The Yak package name is `lux3d-rhino`, version `0.1.4-beta.4`. In Rhino for macOS, run `PackageManager`, enable prerelease versions, and select this version. Save your documents and restart Rhino after installation. The .NET 8 Runtime and a regional API Key are still required. You can also build a local candidate from source using the steps below; consult the [verification records](docs/verification.md) and Yak server for upload status.
 
 ## OAuth sign-in and generation authorization
 
@@ -122,4 +122,4 @@ dotnet test Lux3D.Rhino.sln -c Release --no-build
 python3 scripts/create-fixtures.py --check
 ```
 
-The original acceptance baseline remains in [PRD.md](PRD.md); it has not been rewritten as completed. See [NOTICE](NOTICE), [architecture.md](docs/architecture.md), and [provider-contract.md](docs/provider-contract.md) for attribution and architecture. Both READMEs cover the same scope. The current plugin UI and detailed development documents are primarily in Chinese.
+The original acceptance baseline remains in [PRD.md](PRD.md); it has not been rewritten as completed. See [NOTICE](NOTICE), [architecture.md](docs/architecture.md), and [provider-contract.md](docs/provider-contract.md) for attribution and architecture. Both READMEs cover the same scope. The plugin UI defaults to English and supports Simplified Chinese as described above; detailed development documents are primarily in Chinese.
