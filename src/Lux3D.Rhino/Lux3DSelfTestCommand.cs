@@ -18,23 +18,23 @@ public sealed class Lux3DSelfTestCommand : Command
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
         using var fixtureGet = new GetString();
-        fixtureGet.SetCommandPrompt("Lux3D 非对称 GLB 夹具的绝对路径");
+        fixtureGet.SetCommandPrompt(global::Lux3D.Core.LocalText.Get("Absolute path to the Lux3D asymmetric GLB fixture"));
         if (fixtureGet.Get() != global::Rhino.Input.GetResult.String) return Result.Cancel;
         using var outputGet = new GetString();
-        outputGet.SetCommandPrompt("脱敏验收 JSON 和测试 .3dm 的输出目录（新建子目录，不覆盖现有文件）");
+        outputGet.SetCommandPrompt(global::Lux3D.Core.LocalText.Get("Output directory for redacted acceptance JSON and test .3dm (a new subfolder is created; existing files are not overwritten)"));
         if (outputGet.Get() != global::Rhino.Input.GetResult.String) return Result.Cancel;
         try
         {
             string report = Lux3DSelfTest.Run(fixtureGet.StringResult(), outputGet.StringResult());
             using JsonDocument result = JsonDocument.Parse(File.ReadAllText(report));
             bool passed = result.RootElement.GetProperty("automaticChecksPassed").GetBoolean();
-            global::Rhino.RhinoApp.WriteLine("Lux3D 自测记录：" + report);
-            global::Rhino.RhinoApp.WriteLine(passed ? "自动检查通过；人工 P0 验收仍未完成。" : "自动检查存在失败；请检查报告，当前候选未通过验收。");
+            global::Rhino.RhinoApp.WriteLine(global::Lux3D.Core.LocalText.Get("Lux3D self-test report: ") + report);
+            global::Rhino.RhinoApp.WriteLine(passed ? global::Lux3D.Core.LocalText.Get("Automated checks passed; manual P0 acceptance is still pending.") : global::Lux3D.Core.LocalText.Get("Automated checks failed. Inspect the report; this candidate has not passed acceptance."));
             return passed ? Result.Success : Result.Failure;
         }
         catch (Exception ex)
         {
-            global::Rhino.RhinoApp.WriteLine("Lux3D 自测未完成：" + ex.Message);
+            global::Rhino.RhinoApp.WriteLine(global::Lux3D.Core.LocalText.Get("Lux3D self-test did not complete: ") + ex.Message);
             return Result.Failure;
         }
     }
@@ -46,12 +46,12 @@ public static class Lux3DSelfTest
     private sealed record Check(string Name, bool Passed, object? Evidence, string? Error);
     public static string Run(string fixturePath, string outputDirectory)
     {
-        if (!Path.IsPathRooted(fixturePath) || !Path.IsPathRooted(outputDirectory)) throw new ArgumentException("夹具和输出目录必须为绝对路径。");
+        if (!Path.IsPathRooted(fixturePath) || !Path.IsPathRooted(outputDirectory)) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Fixture and output directories must be absolute paths."));
         byte[] fixture = File.ReadAllBytes(fixturePath);
         Lux3D.Core.GlbContainerValidator.Validate(fixture);
         string sha = Convert.ToHexString(SHA256.HashData(fixture)).ToLowerInvariant();
         bool canonicalFixture = sha is "54b0beb3e3248667cd24aa3afc97373b94cb22ac4101fb2663ffc414f1fc8382" or "97d19134ec64335bd18bf634092d7af21d4e6de3554a85683f294c97dc7ba131";
-        if (!canonicalFixture) throw new InvalidOperationException("确定性自测仅接受本仓库固定 SHA-256 的非对称夹具；普通 GLB 请从面板加载。");
+        if (!canonicalFixture) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("This deterministic test only accepts the repository's fixed-SHA-256 asymmetric fixture. Load ordinary GLB files from the panel."));
         string directory = Path.Combine(outputDirectory, "lux3d-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(directory);
         List<Check> checks = new();
@@ -76,12 +76,12 @@ public static class Lux3DSelfTest
                 {
                     Require(bounds.Min.DistanceTo(new Point3d(11, -33, 22) * scale) <= tolerance &&
                         bounds.Max.DistanceTo(new Point3d(11.5, -29, 25) * scale) <= tolerance,
-                        "Rhino 原生导入的节点/轴向/单位与 glTF (x,-z,y) 米→文档单位预期不符；禁止直接声明此项通过。");
+                        global::Lux3D.Core.LocalText.Get("Rhino's native node/axis/unit import differs from the expected glTF (x,-z,y) meters-to-document mapping. This check must not be reported as passed."));
                     return new { minimum = Coordinates(bounds.Min), maximum = Coordinates(bounds.Max), tolerance };
                 });
                 CheckValue(checks, label + "/triangle-count", () =>
                 {
-                    Require(asset.Audit.Triangles == 8 && asset.Audit.Meshes > 0, "夹具应保留 8 个三角形。");
+                    Require(asset.Audit.Triangles == 8 && asset.Audit.Meshes > 0, global::Lux3D.Core.LocalText.Get("The fixture must retain 8 triangles."));
                     return new { asset.Audit.Meshes, asset.Audit.Vertices, asset.Audit.Triangles };
                 });
                 Plane[] planes =
@@ -102,20 +102,20 @@ public static class Lux3DSelfTest
                 ImportReceipt receipt = host.Commit(asset, intent, importId);
                 CheckValue(checks, label + "/one-block-and-replay", () =>
                 {
-                    Require(Lux3DHostService.Objects(document).Length == 1, "接受候选应仅创建一个顶层 Block。");
-                    Require(document.Objects.FindId(receipt.ObjectId) is InstanceObject, "结果不是 Block。");
-                    Require(host.Commit(asset, intent, importId).ObjectId == receipt.ObjectId && Lux3DHostService.Objects(document).Length == 1, "导入编号重放产生重复对象。");
+                    Require(Lux3DHostService.Objects(document).Length == 1, global::Lux3D.Core.LocalText.Get("Accepting a candidate must create exactly one top-level block."));
+                    Require(document.Objects.FindId(receipt.ObjectId) is InstanceObject, global::Lux3D.Core.LocalText.Get("The result is not a block."));
+                    Require(host.Commit(asset, intent, importId).ObjectId == receipt.ObjectId && Lux3DHostService.Objects(document).Length == 1, global::Lux3D.Core.LocalText.Get("Replaying the import ID created duplicate objects."));
                     return new { receipt.ObjectId, receipt.State };
                 });
                 CheckValue(checks, label + "/undo-replay-redo", () =>
                 {
-                    Require(document.Undo(), "一次 Undo 失败。");
-                    Require(Lux3DHostService.Objects(document).Length == 0, "一次 Undo 未撤销接受候选。");
+                    Require(document.Undo(), global::Lux3D.Core.LocalText.Get("One Undo failed."));
+                    Require(Lux3DHostService.Objects(document).Length == 0, global::Lux3D.Core.LocalText.Get("One Undo did not reverse candidate acceptance."));
                     ImportReceipt undone = host.Commit(asset, intent, importId);
-                    Require(undone.State == "Undone", "Undo 回执状态应为 Undone，实际 " + undone.State);
-                    Require(Lux3DHostService.Objects(document).Length == 0, "Undo 后重放自动重新插入。");
-                    Require(document.Redo(), "Redo 失败。");
-                    Require(host.InspectReceipt(document, importId).State == "Imported" && Lux3DHostService.Objects(document).Length == 1, "Redo 未恢复同一对象。");
+                    Require(undone.State == "Undone", global::Lux3D.Core.LocalText.Get("Expected Undone receipt state after Undo; got ") + undone.State);
+                    Require(Lux3DHostService.Objects(document).Length == 0, global::Lux3D.Core.LocalText.Get("Replay after Undo automatically inserted the object again."));
+                    Require(document.Redo(), global::Lux3D.Core.LocalText.Get("Redo failed."));
+                    Require(host.InspectReceipt(document, importId).State == "Imported" && Lux3DHostService.Objects(document).Length == 1, global::Lux3D.Core.LocalText.Get("Redo did not restore the same object."));
                     return new { undo = undone.State, redo = host.InspectReceipt(document, importId).State };
                 });
                 object materialBefore = MaterialEvidence(Lux3DHostService.Objects(document));
@@ -124,30 +124,30 @@ public static class Lux3DSelfTest
                 {
                     using var options = new FileWriteOptions { IncludeBitmapTable = true, IncludeRenderMeshes = true,
                         SuppressDialogBoxes = true, SuppressAllInput = true, UpdateDocumentPath = false, WriteUserData = true };
-                    Require(document.Write3dmFile(saved, options), "写入测试 3dm 失败。");
+                    Require(document.Write3dmFile(saved, options), global::Lux3D.Core.LocalText.Get("Could not write the test 3dm."));
                     string movedDirectory = Path.Combine(directory, "copied");
                     Directory.CreateDirectory(movedDirectory);
                     string moved = Path.Combine(movedDirectory, label + ".3dm");
                     File.Copy(saved, moved, overwrite: false);
                     using RhinoDoc reopened = RhinoDoc.OpenHeadless(moved);
-                    Require(reopened is not null, "重开测试 3dm 失败。");
+                    Require(reopened is not null, global::Lux3D.Core.LocalText.Get("Could not reopen the test 3dm."));
                     RhinoObject[] objects = Lux3DHostService.Objects(reopened!);
-                    Require(objects.Length == 1 && objects[0] is InstanceObject, "重开文档未保留单 Block。");
+                    Require(objects.Length == 1 && objects[0] is InstanceObject, global::Lux3D.Core.LocalText.Get("The reopened document did not retain a single block."));
                     AssetAudit audit = Lux3DHostService.Audit(objects);
-                    Require(audit.Triangles == asset.Audit.Triangles, "保存重开后三角形数量改变。");
+                    Require(audit.Triangles == asset.Audit.Triangles, global::Lux3D.Core.LocalText.Get("Triangle count changed after saving and reopening."));
                     object after = MaterialEvidence(objects);
                     string first = JsonSerializer.Serialize(materialBefore), second = JsonSerializer.Serialize(after);
-                    Require(first == second, "重开后的材质/纹理证据不一致。");
+                    Require(first == second, global::Lux3D.Core.LocalText.Get("Material/texture evidence differs after reopening."));
                     return new { file = Path.GetFileName(moved), audit.Triangles, material = after,
                         crossProcessMigrationVerified = false, renderedVisualVerified = false };
                 });
                 CheckValue(checks, label + "/manual-delete-receipt", () =>
                 {
                     uint undo = document.BeginUndoRecord("Lux3D self-test delete");
-                    try { Require(document.Objects.Delete(receipt.ObjectId, true), "测试删除失败。"); }
+                    try { Require(document.Objects.Delete(receipt.ObjectId, true), global::Lux3D.Core.LocalText.Get("Test deletion failed.")); }
                     finally { if (undo != 0) document.EndUndoRecord(undo); }
-                    Require(host.InspectReceipt(document, importId).State == "Missing", "手工删除应报告 Missing。");
-                    Require(host.Commit(asset, intent, importId).State == "Missing" && Lux3DHostService.Objects(document).Length == 0, "删除后重放不应重新插入。");
+                    Require(host.InspectReceipt(document, importId).State == "Missing", global::Lux3D.Core.LocalText.Get("Manual deletion must report Missing."));
+                    Require(host.Commit(asset, intent, importId).State == "Missing" && Lux3DHostService.Objects(document).Length == 0, global::Lux3D.Core.LocalText.Get("Replay after deletion must not insert the object again."));
                     return new { state = "Missing" };
                 });
                 evidence.Add(new { units = label, tolerance, nativeBounds = new { min = Coordinates(bounds.Min), max = Coordinates(bounds.Max) }, materials = materialBefore });
@@ -160,7 +160,7 @@ public static class Lux3DSelfTest
             schemaVersion = 1, createdUtc = DateTimeOffset.UtcNow, rhinoVersion = global::Rhino.RhinoApp.Version.ToString(),
             pluginVersion = Lux3DPlugin.DisplayVersion, fixture = Path.GetFileName(fixturePath), fixtureSha256 = sha,
             automaticChecksPassed = checks.All(c => c.Passed), fullP0Acceptance = false,
-            remaining = new[] { "真实 Lux3D 文字/照片生成", "OAuth 用户实际授权及权限", "Rendered 视觉及 PBR 每个通道映射", "关闭 Rhino 后在无原纹理缓存环境重开", "活动文档 A/B 切换与双插件共存" },
+            remaining = new[] { global::Lux3D.Core.LocalText.Get("Real Lux3D text/photo generation"), global::Lux3D.Core.LocalText.Get("Actual OAuth user authorization and permissions"), global::Lux3D.Core.LocalText.Get("Rendered appearance and each PBR channel mapping"), global::Lux3D.Core.LocalText.Get("Reopen after closing Rhino without the original texture cache"), global::Lux3D.Core.LocalText.Get("Switch active documents A/B and verify plugin coexistence") },
             checks, evidence,
         };
         File.WriteAllText(report, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
@@ -187,18 +187,18 @@ public static class Lux3DSelfTest
             source.TextureCoordinates.Add(i / 4f, i / 8f);
             source.VertexColors.Add(System.Drawing.Color.FromArgb(255, 10 + i, 20 + i, 30 + i));
         }
-        Require(!source.IsValid, "修复夹具必须包含无效法向及退化面。");
+        Require(!source.IsValid, global::Lux3D.Core.LocalText.Get("The repair fixture must contain invalid normals and degenerate faces."));
         using Mesh repaired = Lux3DHostService.RepairMeshCopy(source, out int removed);
-        Require(removed == 1 && repaired.Faces.Count == 2 && repaired.IsValid, "有限修复没有得到有效的两个原有三角面。");
-        Require(source.Faces.Count == 3 && !source.IsValid, "修复修改了原始网格。");
+        Require(removed == 1 && repaired.Faces.Count == 2 && repaired.IsValid, global::Lux3D.Core.LocalText.Get("Limited repair did not produce the two valid original triangles."));
+        Require(source.Faces.Count == 3 && !source.IsValid, global::Lux3D.Core.LocalText.Get("Repair modified the original mesh."));
         for (int i = 0; i < source.Vertices.Count; i++)
         {
-            Require(source.Vertices[i].Equals(repaired.Vertices[i]), "修复改变了顶点位置。");
-            Require(source.TextureCoordinates[i].Equals(repaired.TextureCoordinates[i]), "修复改变了 UV。");
-            Require(source.VertexColors[i].Equals(repaired.VertexColors[i]), "修复改变了顶点颜色。");
+            Require(source.Vertices[i].Equals(repaired.Vertices[i]), global::Lux3D.Core.LocalText.Get("Repair changed vertex positions."));
+            Require(source.TextureCoordinates[i].Equals(repaired.TextureCoordinates[i]), global::Lux3D.Core.LocalText.Get("Repair changed UVs."));
+            Require(source.VertexColors[i].Equals(repaired.VertexColors[i]), global::Lux3D.Core.LocalText.Get("Repair changed vertex colors."));
         }
         using Mesh unchanged = Lux3DHostService.RepairMeshCopy(repaired, out int validRemoved);
-        Require(validRemoved == 0 && unchanged.DataCRC(0) == repaired.DataCRC(0), "有效网格不应重新计算或简化。");
+        Require(validRemoved == 0 && unchanged.DataCRC(0) == repaired.DataCRC(0), global::Lux3D.Core.LocalText.Get("A valid mesh must not be recomputed or simplified."));
         return new { removedDegenerateFaces = removed, vertices = repaired.Vertices.Count, triangles = repaired.Faces.Count, preservedSource = true, preservedUvAndColors = true };
     }
     private static object VerifyPreview(RhinoDoc document, PreparedAsset asset, PlacementIntent intent, double tolerance)
@@ -211,7 +211,7 @@ public static class Lux3DSelfTest
         using var preview = new CandidatePreview();
         preview.Show(asset, intent);
         CandidatePreview.PreviewState initial = preview.CaptureState();
-        Require(initial.Visible && initial.GeometryCache is not null && initial.MeshCount > 0, "首次预览没有建立可见缓存。");
+        Require(initial.Visible && initial.GeometryCache is not null && initial.MeshCount > 0, global::Lux3D.Core.LocalText.Get("The initial preview did not create a visible cache."));
 
         // Only move the disposable prepared snapshot, never the user's fixture.
         // Successful slider updates now prove that they do not reopen/hash it.
@@ -231,26 +231,26 @@ public static class Lux3DSelfTest
                 preview.Show(asset, next);
                 CandidatePreview.PreviewState state = preview.CaptureState();
                 Require(ReferenceEquals(initial.GeometryCache, state.GeometryCache) && state.MeshCount == initial.MeshCount,
-                    "只改变放置参数时重新创建了预览网格或材质缓存。");
-                Require(state.DocumentSerial == asset.DocumentSerial, "预览失去了目标文档过滤。");
+                    global::Lux3D.Core.LocalText.Get("Changing placement alone recreated the preview mesh or material cache."));
+                Require(state.DocumentSerial == asset.DocumentSerial, global::Lux3D.Core.LocalText.Get("The preview lost its target-document filter."));
                 Transform expected = next.ToTransform(asset.Audit.Bounds);
                 for (int row = 0; row < 4; row++)
                 for (int column = 0; column < 4; column++)
                     Require(Math.Abs(state.ModelTransform[row, column] - expected[row, column]) <= 1e-12,
-                        "预览绘制矩阵不符合放置意图。");
+                        global::Lux3D.Core.LocalText.Get("The preview draw matrix differs from the placement intent."));
                 Point3d[] corners = state.SourceBounds.GetCorners();
                 for (int corner = 0; corner < corners.Length; corner++) corners[corner].Transform(expected);
                 BoundingBox expectedBounds = new(corners);
                 maximumBoundsError = Math.Max(maximumBoundsError, Math.Max(
                     expectedBounds.Min.DistanceTo(state.Bounds.Min), expectedBounds.Max.DistanceTo(state.Bounds.Max)));
             }
-            Require(maximumBoundsError <= tolerance, "变换后的预览包围盒不包含源包围盒的全部角点。");
+            Require(maximumBoundsError <= tolerance, global::Lux3D.Core.LocalText.Get("The transformed preview bounds do not contain all source bounding-box corners."));
             using var uncachedPreview = new CandidatePreview();
             bool rejectedMissingSnapshot = false;
             try { uncachedPreview.Show(asset, intent); }
             catch (InvalidOperationException) { rejectedMissingSnapshot = true; }
             Require(rejectedMissingSnapshot && !uncachedPreview.Enabled && uncachedPreview.CaptureState().GeometryCache is null,
-                "首次加载预览没有校验缺失快照，或失败后遗留资源。");
+                global::Lux3D.Core.LocalText.Get("Initial preview loading did not detect the missing snapshot, or left resources after failure."));
         }
         finally { File.Move(parkedSnapshot, asset.SnapshotPath); }
 
@@ -258,20 +258,20 @@ public static class Lux3DSelfTest
         preview.Clear();
         CandidatePreview.PreviewState cleared = preview.CaptureState();
         Require(!preview.Enabled && !cleared.Visible && cleared.GeometryCache is null && cleared.MeshCount == 0 && !cleared.Bounds.IsValid,
-            "Clear 没有释放缓存、清除包围盒或关闭显示。");
+            global::Lux3D.Core.LocalText.Get("Clear did not release the cache, clear the bounds or disable display."));
         preview.Show(asset, intent);
-        Require(!ReferenceEquals(initial.GeometryCache, preview.CaptureState().GeometryCache), "Clear 后错误地复用了已释放的缓存。");
+        Require(!ReferenceEquals(initial.GeometryCache, preview.CaptureState().GeometryCache), global::Lux3D.Core.LocalText.Get("A released cache was incorrectly reused after Clear."));
         preview.Dispose();
         preview.Dispose();
         CandidatePreview.PreviewState disposed = preview.CaptureState();
-        Require(disposed.Disposed && !disposed.Visible && disposed.GeometryCache is null, "Dispose 没有释放预览资源。");
+        Require(disposed.Disposed && !disposed.Visible && disposed.GeometryCache is null, global::Lux3D.Core.LocalText.Get("Dispose did not release preview resources."));
         bool rejectedAfterDispose = false;
         try { preview.Show(asset, intent); }
         catch (ObjectDisposedException) { rejectedAfterDispose = true; }
-        Require(rejectedAfterDispose, "已释放的预览不应重新启用。");
-        Require(sourceCrcs.SequenceEqual(sourceMeshes.Select(mesh => mesh.DataCRC(0))), "预览改变了源网格、法向或 UV。");
-        Require(ids.SequenceEqual(Lux3DHostService.Objects(document).Select(obj => obj.Id)), "预览改变了文档对象。");
-        Require(document.NextUndoRecordSerialNumber == undoNumber, "预览改变了 Undo 序列。");
+        Require(rejectedAfterDispose, global::Lux3D.Core.LocalText.Get("A disposed preview must not be enabled again."));
+        Require(sourceCrcs.SequenceEqual(sourceMeshes.Select(mesh => mesh.DataCRC(0))), global::Lux3D.Core.LocalText.Get("Preview changed the source mesh, normals or UVs."));
+        Require(ids.SequenceEqual(Lux3DHostService.Objects(document).Select(obj => obj.Id)), global::Lux3D.Core.LocalText.Get("Preview changed document objects."));
+        Require(document.NextUndoRecordSerialNumber == undoNumber, global::Lux3D.Core.LocalText.Get("Preview changed the Undo sequence."));
         return new { updates = 20, cacheReused = true, sourceUnchanged = true, lifecycleVerified = true,
             transformUpdatesWithoutSnapshotIo = true, maximumBoundsError, tolerance, generationRequests = 0 };
     }
@@ -282,7 +282,7 @@ public static class Lux3DSelfTest
         Point3d anchor = new((b.Min.X + b.Max.X) / 2, (b.Min.Y + b.Max.Y) / 2, b.Min.Z);
         Transform transform = placement.ToTransform(b);
         Point3d mapped = anchor; mapped.Transform(transform);
-        Require(mapped.DistanceTo(placement.Point) <= tolerance, "底部中心未落在放置点。");
+        Require(mapped.DistanceTo(placement.Point) <= tolerance, global::Lux3D.Core.LocalText.Get("The bottom center did not reach the placement point."));
         double radians = placement.RotationDegrees * Math.PI / 180;
         double scale = placement.Height / (b.Max.Z - b.Min.Z);
         double maxError = 0;
@@ -295,7 +295,7 @@ public static class Lux3DSelfTest
             Point3d actual = source; actual.Transform(transform);
             maxError = Math.Max(maxError, actual.DistanceTo(expected));
         }
-        Require(maxError <= tolerance, "变换与完整 U/V/N 平面基预期不一致。");
+        Require(maxError <= tolerance, global::Lux3D.Core.LocalText.Get("The transform differs from the expected full U/V/N plane basis."));
         return new { maxError, tolerance, height = placement.Height, angle = placement.RotationDegrees };
     }
     private static object MaterialEvidence(IEnumerable<RhinoObject> roots)
@@ -315,7 +315,7 @@ public static class Lux3DSelfTest
     private static object? RenderEvidence(RenderContent? content, int depth)
     {
         if (content is null) return null;
-        if (depth > 32) throw new InvalidOperationException("材质节点过深。");
+        if (depth > 32) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Material node nesting is too deep."));
         var children = new List<object?>();
         for (RenderContent? child = content.FirstChild; child is not null; child = child.NextSibling) children.Add(RenderEvidence(child, depth + 1));
         string? sha = string.IsNullOrEmpty(content.Filename) ? null : File.Exists(content.Filename)

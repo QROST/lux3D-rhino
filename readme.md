@@ -3,6 +3,8 @@
 English | [简体中文](readme.zh-CN.md)
 
 An independent Rhino integration by **CuriousArc · qrost**, not an official Manycore, Aholo, or McNeel product. Features include Manycore OAuth sign-in, Lux3D text/single-image generation, persistent asset caching, GLB candidate previews, and independent Block placement. The current version is **0.1.4-beta.3**. This Yak distribution targets **macOS / Rhino 8.32+**. Windows implementation and build scripts are present; host acceptance and a public Windows distribution remain pending.
+The interface uses English by default. At plugin load, Rhino’s UI language takes precedence over the system UI language; Chinese locales (including Traditional Chinese locales) use the Simplified Chinese translation. If Rhino cannot report its language, the system UI language is used, with English for other or unknown languages. Restart Rhino after changing its language. This includes the private background process and OAuth callback page; prompts, model names and saved identifiers are not translated. Numeric formatting keeps the user’s regional settings. Known complete diagnostic messages from older task records are localized when read; dynamic legacy diagnostics and unrecognized provider messages retain their original text.
+
 
 **Generating models in this version requires an API Key for the selected region. Signing in with Manycore OAuth does not remove that requirement. You can also skip OAuth sign-in in the plugin and configure an API Key directly.**
 
@@ -40,10 +42,10 @@ The extra API Key requirement therefore reflects the documented REST contract an
 
 To start generating:
 
-1. Select the international or China region on the **Connection** (`连接`) tab.
+1. Select the international or China region on the **Connection** tab.
 2. Obtain an API Key from the corresponding official regional platform. For the international region, see [Aholo Labs API Keys](https://labs.aholo.ai/api-keys) and the [official quick start](https://labs.aholo.ai/api-docs/en/quickstart). Keys are not interchangeable between regions.
-3. Enter the key in the password field and click **Set API Key** (`设置 API Key`). Choose session-only use or system credential storage. Validation only queries the task list; it neither creates a generation task nor checks remaining credits.
-4. Submit a task from the **Generate** (`生成`) tab. OAuth sign-in is optional. Local GLB candidate preview and placement require neither OAuth nor an API Key.
+3. Enter the key in the password field and click **Set API Key**. Choose session-only use or system credential storage. Validation only queries the task list; it neither creates a generation task nor checks remaining credits.
+4. Submit a task from the **Generate** tab. OAuth sign-in is optional. Local GLB candidate preview and placement require neither OAuth nor an API Key.
 
 ## Local installation
 
@@ -76,7 +78,7 @@ The background process resolves `DOTNET_ROOT_<architecture>`, `DOTNET_ROOT`, sta
 
 ## Manycore OAuth sign-in (optional)
 
-On the Connection tab, select the international or China region, click **Manycore OAuth sign-in** (`Manycore OAuth 登录`), and complete official authorization in your system browser. The plugin uses official resource/authorization-server discovery, dynamic public-client registration, PKCE S256, random state, and a local loopback callback. Enter account passwords only on the official website.
+On the Connection tab, select the international or China region, click **OAuth sign-in (optional)**, and complete official authorization in your system browser. The plugin uses official resource/authorization-server discovery, dynamic public-client registration, PKCE S256, random state, and a local loopback callback. Enter account passwords only on the official website.
 
 On macOS, tokens are stored in product-specific Keychain entries. On Windows, credentials are encrypted using the current user's DPAPI and written to a restricted directory. This supports longer OAuth sessions without Credential Manager's per-entry size limit. Credentials are excluded from `.3dm` files, task history, plaintext configuration, and logs. Disconnecting removes local credentials; manage remote authorization on the official account website. Failed, canceled, or timed-out sign-in does not create generation tasks.
 
@@ -92,9 +94,9 @@ The official OAuth metadata currently advertises only the `get_user_info` scope.
 
 Choose text or a single PNG/JPEG image. The panel currently offers `G1-Turbo` with a target face count of 10,000–300,000. `G1` is not exposed because its ZIP output path is not yet supported. Only clicking **Generate** submits a task that consumes service credits. A local task record is written before submission; an unknown submission outcome is never automatically resubmitted. Query or download failures can be retried against the original task, which remains bound to its original region and connection. History displays 30 entries per page and retains all original records.
 
-The demo flow enables **Place in current document when generation completes** (`生成完成后放入当前文档`) by default. Submission captures the target document, placement point, height, and rotation. Once the result passes validation, the plugin creates an independent Block and zooms to the model. The target document must remain open, active, and writable; closing the panel cancels this automatic placement intent. For existing tasks, click **Place in current document** (`放入当前文档`) on the task tab. If necessary, this resumes the original task's download without regenerating. Repeated clicks locate the existing Block rather than insert duplicates; Undo does not trigger automatic reinsertion.
+The demo flow enables **Place in current document when ready** by default. Submission captures the target document, placement point, height, and rotation. Once the result passes validation, the plugin creates an independent Block and zooms to the model. The target document must remain open, active, and writable; closing the panel cancels this automatic placement intent. For existing tasks, click **Place in current document** on the task tab. If necessary, this resumes the original task's download without regenerating. Repeated clicks locate the existing Block rather than insert duplicates; Undo does not trigger automatic reinsertion.
 
-You can also run `Lux3DPlaceTask <operation GUID>` to place an existing task using the current CPlane and an approximately one-meter reference height. The command finishes before asynchronous import begins, preserving an independent Undo record. Alternatively, disable automatic placement and add up to three candidates from the task tab, or load a local GLB. Adjust height, placement point, and rotation, then click **Accept current candidate** (`接受当前候选`). Switching candidates changes only the temporary preview.
+You can also run `Lux3DPlaceTask <operation GUID>` to place an existing task using the current CPlane and an approximately one-meter reference height. The command finishes before asynchronous import begins, preserving an independent Undo record. Alternatively, disable automatic placement and add up to three candidates from the task tab, or load a local GLB. Adjust height, placement point, and rotation, then click **Accept current candidate**. Switching candidates changes only the temporary preview.
 
 The plugin imposes no business limits on vertex or triangle counts, mesh counts, node depth, GLB file size, or total texture pixels. The generation target face count is not an import capacity limit. Container integrity, byte ranges, indices, references, cycles, and hashes are still checked; Rhino determines the actual import result. Static meshes with embedded resources are supported. Unsupported required extensions, animation, and skinning are reported explicitly. System-memory and runtime failures are distinguished from invalid formats; unlimited capacity is not promised. Structurally rejected outputs retain a reason code and diagnostic copy and are not treated as importable models. Full PBR appearance and texture transfer have a separate acceptance checklist; previews currently show geometry and base color.
 

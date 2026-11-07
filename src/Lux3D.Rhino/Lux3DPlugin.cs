@@ -18,13 +18,17 @@ public sealed class Lux3DPlugin : PlugIn
     internal TaskPlacementService Placement { get; private set; } = null!;
     protected override LoadReturnCode OnLoad(ref string errorMessage)
     {
+        int? languageId = null;
+        try { languageId = global::Rhino.UI.Localization.CurrentLanguageId; }
+        catch (Exception) { /* If the host cannot report a language, use the system UI language. */ }
+        LocalText.Configure(languageId, System.Globalization.CultureInfo.CurrentUICulture.Name);
         Instance = this;
         string directory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
         Client = new Lux3DClient(Path.Combine(directory, "sidecar"));
         Placement = new TaskPlacementService(Host, Client);
         global::Rhino.UI.Panels.RegisterPanel(this, typeof(Lux3DPanel), "Lux3D", null!, global::Rhino.UI.PanelType.PerDoc);
         global::Rhino.RhinoDoc.CloseDocument += OnCloseDocument;
-        global::Rhino.RhinoApp.WriteLine("Lux3D " + DisplayVersion + " 已加载。输入 Lux3DPanel 打开面板。");
+        global::Rhino.RhinoApp.WriteLine("Lux3D " + DisplayVersion + global::Lux3D.Core.LocalText.Get(" loaded. Enter Lux3DPanel to open the panel."));
         return LoadReturnCode.Success;
     }
     private void OnCloseDocument(object? sender, global::Rhino.DocumentEventArgs e) => Host.Forget(e.DocumentSerialNumber);

@@ -39,8 +39,8 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
         try { Ensure(SecKeychainItemDelete(item)); return Task.CompletedTask; }
         finally { if (data != IntPtr.Zero) SecKeychainItemFreeContent(IntPtr.Zero, data); if (item != IntPtr.Zero) CFRelease(item); }
     }
-    private static void Check(CancellationToken ct) { ct.ThrowIfCancellationRequested(); if (!OperatingSystem.IsMacOS()) throw new PlatformNotSupportedException("当前凭证存储使用 macOS 钥匙串。"); }
-    private static void Ensure(int status) { if (status != 0) throw new ProviderException("keychain_error", $"macOS 钥匙串访问失败 (OSStatus {status})。"); }
+    private static void Check(CancellationToken ct) { ct.ThrowIfCancellationRequested(); if (!OperatingSystem.IsMacOS()) throw new PlatformNotSupportedException(global::Lux3D.Core.LocalText.Get("This credential store uses macOS Keychain.")); }
+    private static void Ensure(int status) { if (status != 0) throw new ProviderException("keychain_error", global::Lux3D.Core.LocalText.Format("macOS Keychain access failed (OSStatus {0}).", status)); }
     private const string Security = "/System/Library/Frameworks/Security.framework/Security";
     [DllImport(Security)] private static extern int SecKeychainFindGenericPassword(IntPtr keychain, uint serviceLength, byte[] service, uint accountLength, byte[] account, out uint passwordLength, out IntPtr passwordData, out IntPtr itemRef);
     [DllImport(Security)] private static extern int SecKeychainAddGenericPassword(IntPtr keychain, uint serviceLength, byte[] service, uint accountLength, byte[] account, uint passwordLength, byte[] passwordData, out IntPtr itemRef);

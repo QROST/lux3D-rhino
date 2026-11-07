@@ -22,7 +22,7 @@ internal static class TaskPlacementPolicy
     // Session identity remains a separate guard on every asynchronous request.
     public static Guid ImportId(Guid operationId)
     {
-        if (operationId == Guid.Empty) throw new ArgumentException("任务操作编号不能为空。");
+        if (operationId == Guid.Empty) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("The task operation ID cannot be empty."));
         byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes("Lux3D.DirectPlacement.v1:" + operationId.ToString("D")));
         return new Guid(digest.AsSpan(0, 16));
     }
@@ -31,29 +31,29 @@ internal static class TaskPlacementPolicy
         !string.IsNullOrWhiteSpace(task.AssetSha256) && File.Exists(task.AssetPath);
     public static string NotReadyMessage(TaskRecord task) => task.State switch
     {
-        "Ready" => "本地模型缓存或校验记录缺失；请查询原任务以重新下载，不必重新生成。",
-        "Rejected" => "模型已生成，但下载资产未通过校验。请查询原任务尝试恢复；无需重新创建付费任务。" + Detail(task.Error),
-        "DownloadFailed" => "模型已生成，下载尚未成功；请查询原任务重试下载。" + Detail(task.Error),
-        "Queued" or "Running" => "原任务仍在生成中；可继续等待，完成后再放入。",
-        "Succeeded" or "Downloading" or "Validating" => "原任务已生成，模型仍在下载或校验中，请稍后再放入。",
-        "SubmissionUnknown" => "创建结果未知；请先核对提供方任务记录，不要直接重新生成。",
-        "StatusUnknown" => "提供方任务状态尚未确认；请稍后查询原任务。" + Detail(task.Error),
-        "Failed" => "提供方生成失败，当前没有可放入的模型。" + Detail(task.Error),
-        "ProviderCancelled" => "提供方已取消此任务，当前没有可放入的模型。",
-        _ => "此任务还没有可放入的已校验模型。" + Detail(task.Error),
+        "Ready" => global::Lux3D.Core.LocalText.Get("The local model cache or validation record is missing. Query the original task to download it again; no new generation is needed."),
+        "Rejected" => global::Lux3D.Core.LocalText.Get("The model was generated, but its download failed validation. Query the original task to recover it; no new paid task is needed.") + Detail(task.Error),
+        "DownloadFailed" => global::Lux3D.Core.LocalText.Get("The model was generated, but its download did not succeed. Query the original task to retry.") + Detail(task.Error),
+        "Queued" or "Running" => global::Lux3D.Core.LocalText.Get("The original task is still generating. Wait for it to finish before placing."),
+        "Succeeded" or "Downloading" or "Validating" => global::Lux3D.Core.LocalText.Get("The original task was generated; its model is still downloading or validating. Try placement later."),
+        "SubmissionUnknown" => global::Lux3D.Core.LocalText.Get("The creation result is unknown. Check the provider's task record before generating again."),
+        "StatusUnknown" => global::Lux3D.Core.LocalText.Get("The provider task state is not confirmed yet. Query the original task later.") + Detail(task.Error),
+        "Failed" => global::Lux3D.Core.LocalText.Get("Provider generation failed; no model is available to place.") + Detail(task.Error),
+        "ProviderCancelled" => global::Lux3D.Core.LocalText.Get("The provider cancelled this task; no model is available to place."),
+        _ => global::Lux3D.Core.LocalText.Get("This task has no validated model to place yet.") + Detail(task.Error),
     };
     public static string ErrorMessage(Exception exception)
     {
         string message = exception switch
         {
-            OutOfMemoryException => "系统内存不足，未能完成模型放入；原任务和资产记录仍保留。请先检查当前文档，再释放内存并重试原任务，无需重新生成。",
-            AssetValidationException validation => "模型校验未通过（" + validation.Code + "）：" + validation.Message + "；原任务和资产记录仍保留，请勿重复生成。",
-            FileNotFoundException or DirectoryNotFoundException => "模型缓存不存在；请查询原任务重新下载后再放入。",
-            _ => "未能放入模型：" + exception.Message,
+            OutOfMemoryException => global::Lux3D.Core.LocalText.Get("Not enough memory to place the model. The original task and asset records are retained. Inspect the current document, free memory and retry the original task without regenerating."),
+            AssetValidationException validation => global::Lux3D.Core.LocalText.Get("Model validation failed (") + validation.Code + "）：" + validation.Message + global::Lux3D.Core.LocalText.Get(". The original task and asset records are retained; do not regenerate."),
+            FileNotFoundException or DirectoryNotFoundException => global::Lux3D.Core.LocalText.Get("The model cache is missing. Query the original task to download it again before placing."),
+            _ => global::Lux3D.Core.LocalText.Get("Could not place the model: ") + exception.Message,
         };
-        return exception.Data["Lux3D.DiagnosticPath"] is string report ? message + " 诊断记录：" + report : message;
+        return exception.Data["Lux3D.DiagnosticPath"] is string report ? message + global::Lux3D.Core.LocalText.Get(" Diagnostic log: ") + report : message;
     }
-    private static string Detail(string? error) => string.IsNullOrWhiteSpace(error) ? string.Empty : " 原因：" + error;
+    private static string Detail(string? error) => string.IsNullOrWhiteSpace(error) ? string.Empty : global::Lux3D.Core.LocalText.Get(" Reason: ") + error;
 }
 
 /// <summary>Task lookup/download is asynchronous; all Rhino access stays on the UI thread.</summary>
@@ -67,11 +67,11 @@ internal sealed class TaskPlacementService
 
     public TaskPlacementTarget Capture(RhinoDoc doc, PlacementIntent placement)
     {
-        if (global::Rhino.RhinoApp.InvokeRequired) throw new InvalidOperationException("请从 Rhino 界面发起放置。");
+        if (global::Rhino.RhinoApp.InvokeRequired) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Start placement from Rhino's interface."));
         if (RhinoDoc.ActiveDoc?.RuntimeSerialNumber != doc.RuntimeSerialNumber)
-            throw new InvalidOperationException("请先激活面板绑定的目标文档，再放入模型。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Activate the document linked to this panel before placing the model."));
         // IsLocked means this document owns the on-disk file lock, not that it is read-only.
-        if (doc.IsClosing || doc.IsReadOnly) throw new InvalidOperationException("目标文档当前不可写。");
+        if (doc.IsClosing || doc.IsReadOnly) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The target document is not writable."));
         RequireModelViewport(doc);
         return new TaskPlacementTarget(doc.RuntimeSerialNumber, _host.Session(doc), doc.ModelUnitSystem, placement);
     }
@@ -85,14 +85,14 @@ internal sealed class TaskPlacementService
     public async Task<TaskPlacementResult> PlaceAsync(Guid operationId, TaskPlacementTarget target, Func<bool>? stillAllowed = null)
     {
         var key = (target.DocumentSerial, operationId);
-        if (!_inFlight.TryAdd(key, 0)) return new TaskPlacementResult("Deferred", "此任务正在放入，请等待本次操作完成。");
+        if (!_inFlight.TryAdd(key, 0)) return new TaskPlacementResult("Deferred", global::Lux3D.Core.LocalText.Get("This task is already being placed. Wait for the current operation."));
         var trace = NewTrace(operationId, target);
         try
         {
             trace.Record("read-task");
             TaskRecord task = await _client.GetTaskAsync(operationId).ConfigureAwait(false);
             TaskPlacementResult? existing = await OnUiAsync(() => stillAllowed is not null && !stillAllowed()
-                ? new TaskPlacementResult("Deferred", "放置已暂停；请重新显示面板后手动放入。") : FindExisting(target, task)).ConfigureAwait(false);
+                ? new TaskPlacementResult("Deferred", global::Lux3D.Core.LocalText.Get("Placement is paused. Show the panel again and place manually.")) : FindExisting(target, task)).ConfigureAwait(false);
             if (existing is not null) return Finish(trace, existing);
             if (!TaskPlacementPolicy.HasCachedAsset(task) && TaskPlacementPolicy.CanRefresh(task))
             {
@@ -107,7 +107,7 @@ internal sealed class TaskPlacementService
     public async Task<TaskPlacementResult> PlaceReadyAsync(TaskRecord task, TaskPlacementTarget target, Func<bool> stillAllowed)
     {
         var key = (target.DocumentSerial, task.OperationId);
-        if (!_inFlight.TryAdd(key, 0)) return new TaskPlacementResult("Deferred", "此任务正在放入，请等待本次操作完成。");
+        if (!_inFlight.TryAdd(key, 0)) return new TaskPlacementResult("Deferred", global::Lux3D.Core.LocalText.Get("This task is already being placed. Wait for the current operation."));
         var trace = NewTrace(task.OperationId, target);
         try { return Finish(trace, await PrepareAndPlaceAsync(task, target, stillAllowed, trace).ConfigureAwait(false)); }
         catch (Exception ex) { RecordFailure(trace, ex); throw; }
@@ -120,16 +120,16 @@ internal sealed class TaskPlacementService
         {
             string? message = stage switch
             {
-                "read-task" => "读取本地任务记录",
-                "recover-original-task" => "查询原任务并恢复下载（不会重新生成）",
-                "preflight_file_start" => "校验模型文件并准备导入快照",
-                "preflight_start" or "preflight_native_import_start" => "Rhino 正在预检模型",
-                "preflight_native_import_result" => "检查并修复预检网格",
-                "commit_start" => "准备正式导入与撤销记录",
-                "commit_native_import_start" => "Rhino 正在导入当前文档",
-                "commit_native_import_result" => "检查导入网格并创建 Block",
-                "commit_block_geometry_ready" => "放置模型并准备定位视图",
-                "view" => "模型已导入，正在完成记录",
+                "read-task" => global::Lux3D.Core.LocalText.Get("Read local task record"),
+                "recover-original-task" => global::Lux3D.Core.LocalText.Get("Query original task and recover download (no new generation)"),
+                "preflight_file_start" => global::Lux3D.Core.LocalText.Get("Verify model file and prepare import snapshot"),
+                "preflight_start" or "preflight_native_import_start" => global::Lux3D.Core.LocalText.Get("Rhino is preflighting the model"),
+                "preflight_native_import_result" => global::Lux3D.Core.LocalText.Get("Check and repair preflight meshes"),
+                "commit_start" => global::Lux3D.Core.LocalText.Get("Prepare final import and undo record"),
+                "commit_native_import_start" => global::Lux3D.Core.LocalText.Get("Rhino is importing into the current document"),
+                "commit_native_import_result" => global::Lux3D.Core.LocalText.Get("Check imported meshes and create block"),
+                "commit_block_geometry_ready" => global::Lux3D.Core.LocalText.Get("Place model and prepare view framing"),
+                "view" => global::Lux3D.Core.LocalText.Get("Model imported; finishing records"),
                 _ => null,
             };
             if (message is null) return;
@@ -154,15 +154,15 @@ internal sealed class TaskPlacementService
     private static void RequireModelViewport(RhinoDoc doc)
     {
         if (doc.Views.ActiveView is global::Rhino.Display.RhinoPageView { PageIsActive: true })
-            throw new InvalidOperationException("当前处于布局纸面；请切换到模型视图或激活布局中的模型细节视口，再放入模型。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The current view is layout paper space. Switch to a model view or activate a layout detail before placing the model."));
     }
     private RhinoDoc ResolveTarget(TaskPlacementTarget target)
     {
-        RhinoDoc doc = RhinoDoc.FromRuntimeSerialNumber(target.DocumentSerial) ?? throw new InvalidOperationException("提交时的目标文档已关闭；请在目标文档手动放入此任务。");
-        if (_host.Session(doc) != target.DocumentSession) throw new InvalidOperationException("目标文档会话已改变；请手动重新选择目标文档。");
-        if (doc.ModelUnitSystem != target.Units) throw new InvalidOperationException("目标文档单位已改变；请重新确认参考高度后手动放入。");
-        if (RhinoDoc.ActiveDoc?.RuntimeSerialNumber != target.DocumentSerial) throw new InvalidOperationException("已切换到其他文档，未自动放入。请激活原文档后点击“放入当前文档”。");
-        if (doc.IsClosing || doc.IsReadOnly) throw new InvalidOperationException("目标文档当前不可写；请恢复后手动放入。");
+        RhinoDoc doc = RhinoDoc.FromRuntimeSerialNumber(target.DocumentSerial) ?? throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The document used at submission is closed. Place this task manually in the target document."));
+        if (_host.Session(doc) != target.DocumentSession) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The target document session changed. Select the target document again manually."));
+        if (doc.ModelUnitSystem != target.Units) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The target document units changed. Confirm the reference height again before placing manually."));
+        if (RhinoDoc.ActiveDoc?.RuntimeSerialNumber != target.DocumentSerial) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Another document is active; automatic placement was skipped. Activate the original document and click Place in current document."));
+        if (doc.IsClosing || doc.IsReadOnly) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The target document is not writable. Restore access and place manually."));
         RequireModelViewport(doc);
         return doc;
     }
@@ -170,20 +170,20 @@ internal sealed class TaskPlacementService
     {
         RhinoDoc doc = ResolveTarget(target);
         if (doc.IsCommandRunning || doc.UndoRecordingIsActive)
-            return new TaskPlacementResult("Deferred", "请先结束当前 Rhino 命令；自动放置会在后续轮询重试，手动放置请再次点击。");
+            return new TaskPlacementResult("Deferred", global::Lux3D.Core.LocalText.Get("Finish the current Rhino command. Automatic placement will retry on a later poll; click again for manual placement."));
         ImportReceipt? receipt = _host.FindReceipt(doc, TaskPlacementPolicy.ImportId(task.OperationId));
         if (receipt is null) return null;
-        if (receipt.State == "Undone") return new TaskPlacementResult("Undone", "此任务的 Block 已撤销；请使用 Redo 恢复。再次点击不会自动重新插入。", receipt.ObjectId);
-        if (receipt.State != "Imported") return new TaskPlacementResult("Missing", "此前放入的 Block 已删除或缺失；不会自动重新插入。需要新实例时，请加入候选并明确接受。", receipt.ObjectId);
+        if (receipt.State == "Undone") return new TaskPlacementResult("Undone", global::Lux3D.Core.LocalText.Get("This task's block was undone. Use Redo to restore it; clicking again does not insert another copy."), receipt.ObjectId);
+        if (receipt.State != "Imported") return new TaskPlacementResult("Missing", global::Lux3D.Core.LocalText.Get("The previous block was deleted or is missing; it will not be inserted again automatically. Add and explicitly accept a candidate for a new instance."), receipt.ObjectId);
         if (task.AssetSha256 is not null && !string.Equals(task.AssetSha256, receipt.AssetSha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("同一任务的资产哈希与文档内已有 Block 不一致，请先核对任务记录。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The task's asset hash differs from its existing block in the document. Check the task record first."));
         string zoom = ZoomToObject(doc, receipt.ObjectId);
-        return new TaskPlacementResult("Existing", "此任务已在当前文档中；没有重复插入。" + (zoom.Length == 0 ? "已定位已有 Block。" : zoom), receipt.ObjectId);
+        return new TaskPlacementResult("Existing", global::Lux3D.Core.LocalText.Get("This task is already in the current document; no duplicate was inserted.") + (zoom.Length == 0 ? global::Lux3D.Core.LocalText.Get("Located the existing block.") : zoom), receipt.ObjectId);
     }
     private async Task<TaskPlacementResult> PrepareAndPlaceAsync(TaskRecord task, TaskPlacementTarget target, Func<bool>? stillAllowed, HostImportTrace trace)
     {
         TaskPlacementResult? existing = await OnUiAsync(() => stillAllowed is not null && !stillAllowed()
-            ? new TaskPlacementResult("Deferred", "自动放置已暂停；重新显示面板可继续。") : FindExisting(target, task)).ConfigureAwait(false);
+            ? new TaskPlacementResult("Deferred", global::Lux3D.Core.LocalText.Get("Automatic placement is paused; show the panel again to continue.")) : FindExisting(target, task)).ConfigureAwait(false);
         if (existing is not null) return existing;
         if (!TaskPlacementPolicy.HasCachedAsset(task)) throw new InvalidOperationException(TaskPlacementPolicy.NotReadyMessage(task));
         // Pure file/managed work only: no RhinoDoc, geometry or UI access on this worker.
@@ -192,7 +192,7 @@ internal sealed class TaskPlacementService
     }
     private TaskPlacementResult PlaceOnUiThread(TaskRecord task, TaskPlacementTarget target, Func<bool>? stillAllowed, HostImportTrace trace, GlbImportSnapshot snapshot)
     {
-        if (stillAllowed is not null && !stillAllowed()) return new TaskPlacementResult("Deferred", "自动放置已暂停；重新显示面板可继续。");
+        if (stillAllowed is not null && !stillAllowed()) return new TaskPlacementResult("Deferred", global::Lux3D.Core.LocalText.Get("Automatic placement is paused; show the panel again to continue."));
         TaskPlacementResult? existing = FindExisting(target, task);
         if (existing is not null) return existing;
         RhinoDoc doc = ResolveTarget(target);
@@ -201,16 +201,16 @@ internal sealed class TaskPlacementService
         try
         {
             // Native preflight may pump host events. Recheck intent and target before the actual mutation.
-            if (stillAllowed is not null && !stillAllowed()) return new TaskPlacementResult("Deferred", "自动放置已暂停；重新显示面板可继续。");
+            if (stillAllowed is not null && !stillAllowed()) return new TaskPlacementResult("Deferred", global::Lux3D.Core.LocalText.Get("Automatic placement is paused; show the panel again to continue."));
             doc = ResolveTarget(target);
-            if (doc.IsCommandRunning || doc.UndoRecordingIsActive) return new TaskPlacementResult("Deferred", "Rhino 正在执行命令；结束后可继续放入模型。");
+            if (doc.IsCommandRunning || doc.UndoRecordingIsActive) return new TaskPlacementResult("Deferred", global::Lux3D.Core.LocalText.Get("Rhino is running a command. Finish it before placing the model."));
             ImportReceipt receipt = _host.Commit(prepared, target.Placement, TaskPlacementPolicy.ImportId(task.OperationId), task.OperationId, trace);
-            if (receipt.State != "Imported") return new TaskPlacementResult(receipt.State, "此任务之前已被撤销或删除，未重复插入；可用 Redo 或候选方式恢复。", receipt.ObjectId);
+            if (receipt.State != "Imported") return new TaskPlacementResult(receipt.State, global::Lux3D.Core.LocalText.Get("This task was previously undone or deleted; no duplicate was inserted. Restore with Redo or through a candidate."), receipt.ObjectId);
             string zoom = ZoomToObject(doc, receipt.ObjectId);
             trace.Record("view", zoom.Length == 0 ? "zoomed-to-block" : zoom);
             string repairs = prepared.Audit.RemovedDegenerateFaces > 0 || prepared.Audit.RecomputedNormalMeshes > 0
-                ? $" 已移除 {prepared.Audit.RemovedDegenerateFaces} 个退化面，并为 {prepared.Audit.RecomputedNormalMeshes} 个网格重算法线；原 GLB 保留。" : string.Empty;
-            return new TaskPlacementResult("Placed", "模型已放入当前文档并创建独立 Block；一次 Undo 可撤销。" + repairs + zoom, receipt.ObjectId);
+                ? global::Lux3D.Core.LocalText.Format(" Removed {0} degenerate faces and recomputed normals for {1} meshes; the original GLB is retained.", prepared.Audit.RemovedDegenerateFaces, prepared.Audit.RecomputedNormalMeshes) : string.Empty;
+            return new TaskPlacementResult("Placed", global::Lux3D.Core.LocalText.Get("The model was placed in the current document as an independent block; one Undo reverses it.") + repairs + zoom, receipt.ObjectId);
         }
         finally
         {
@@ -225,19 +225,19 @@ internal sealed class TaskPlacementService
         {
             var view = doc.Views.ActiveView;
             RhinoObject? item = doc.Objects.FindId(objectId);
-            if (view is null || item is null) return " 视图未自动定位，可选中该 Block 后执行 ZoomSelected。";
+            if (view is null || item is null) return global::Lux3D.Core.LocalText.Get(" The view was not framed automatically. Select the block and run ZoomSelected.");
             if (item.IsHidden || !doc.Layers[item.Attributes.LayerIndex].IsVisible)
-                return " Block 已存在，但对象或所属图层已隐藏；请显示该对象/图层后再定位。";
+                return global::Lux3D.Core.LocalText.Get(" The block exists, but the object or its layer is hidden. Show it before locating it.");
             BoundingBox bounds = BoundingBox.Empty;
             foreach (var (mesh, transform, _) in Lux3DHostService.Meshes(new[] { item }, Transform.Identity))
                 bounds.Union(mesh.GetBoundingBox(transform));
-            if (!bounds.IsValid) return " 视图未自动定位，可手动执行 ZoomSelected。";
+            if (!bounds.IsValid) return global::Lux3D.Core.LocalText.Get(" The view was not framed automatically. Run ZoomSelected manually.");
             bounds.Inflate(Math.Max(bounds.Diagonal.Length * 0.08, doc.ModelAbsoluteTolerance));
             bool zoomed = view.ActiveViewport.ZoomBoundingBox(bounds);
             view.Redraw();
-            return zoomed ? string.Empty : " 视图未自动定位，可手动执行 ZoomSelected。";
+            return zoomed ? string.Empty : global::Lux3D.Core.LocalText.Get(" The view was not framed automatically. Run ZoomSelected manually.");
         }
-        catch { return " 视图定位未完成，Block 已成功导入；请手动缩放视图。"; }
+        catch { return global::Lux3D.Core.LocalText.Get("View framing did not complete, but the block was imported successfully. Adjust the view manually."); }
     }
     internal static Task<T> OnUiAsync<T>(Func<T> action)
     {

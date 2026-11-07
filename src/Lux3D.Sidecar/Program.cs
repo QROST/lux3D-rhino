@@ -5,6 +5,9 @@ using Lux3D.Core;
 using Lux3D.Provider;
 using Lux3D.Sidecar;
 
+// Use the host's resolved language even when the operating system uses another language.
+LocalText.Configure(null, Environment.GetEnvironmentVariable(LocalText.LanguageEnvironmentVariable) ?? System.Globalization.CultureInfo.CurrentUICulture.Name);
+
 // Dedicated inherited stdin/stdout pipes: no listening TCP control port and no discovery secret.
 Console.InputEncoding = new UTF8Encoding(false);
 Console.OutputEncoding = new UTF8Encoding(false);
@@ -39,7 +42,7 @@ if (args.Length == 2 && args[0] == "--recover-task")
     }
     catch (Exception ex)
     {
-        string message = ex is ProviderException or InvalidOperationException ? ex.Message : "原任务恢复未完成，请检查任务编号、已保存的原区域凭证与网络。";
+        string message = ex is ProviderException or InvalidOperationException ? ex.Message : global::Lux3D.Core.LocalText.Get("Original task recovery did not complete. Check its ID, saved credentials for the original region, and network.");
         Console.WriteLine(message); Environment.ExitCode = 2;
     }
     return;
@@ -55,14 +58,14 @@ if (args.Length == 2 && args[0] is "--oauth-login" or "--oauth-probe")
         else
         {
             string region = LuxRegions.Parse(args[1]) == LuxRegion.China ? "cn" : "global";
-            OAuthToken token = await GetToken(region, timeout.Token) ?? throw new InvalidOperationException("请先完成 OAuth 登录。");
+            OAuthToken token = await GetToken(region, timeout.Token) ?? throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Complete OAuth sign-in first."));
             result = await new OAuthMcpProbe(http).InspectAsync(token, timeout.Token);
         }
         Console.WriteLine(JsonSerializer.Serialize(result, LuxJson.Options));
     }
-    catch (OperationCanceledException) { Console.WriteLine("OAuth 已取消或超时，未调用生成。请从 Rhino 面板重新登录。"); Environment.ExitCode = 2; }
+    catch (OperationCanceledException) { Console.WriteLine(global::Lux3D.Core.LocalText.Get("OAuth was cancelled or timed out; generation was not called. Sign in again from the Rhino panel.")); Environment.ExitCode = 2; }
     catch (ProviderException ex) { Console.WriteLine(ex.Message); Environment.ExitCode = 2; }
-    catch (Exception) { Console.WriteLine("OAuth 未完成。请检查网络、系统凭证存储权限和账户授权后重试。"); Environment.ExitCode = 2; }
+    catch (Exception) { Console.WriteLine(global::Lux3D.Core.LocalText.Get("OAuth did not complete. Check network, system credential permissions and account authorization, then try again.")); Environment.ExitCode = 2; }
     return;
 }
 
@@ -76,9 +79,9 @@ while (true)
     RpcResponse response;
     try
     {
-        var request = JsonSerializer.Deserialize<RpcRequest>(line, LuxJson.Options) ?? throw new IOException("请求无效。");
+        var request = JsonSerializer.Deserialize<RpcRequest>(line, LuxJson.Options) ?? throw new IOException(global::Lux3D.Core.LocalText.Get("Invalid request."));
         id = request.Id;
-        if (request.Version != 1 || id == Guid.Empty) throw new IOException("协议版本不兼容。");
+        if (request.Version != 1 || id == Guid.Empty) throw new IOException(global::Lux3D.Core.LocalText.Get("Incompatible protocol version."));
         using var timeout = new CancellationTokenSource(request.Method == "login" ? TimeSpan.FromMinutes(5) : TimeSpan.FromMinutes(3));
         object result = await Dispatch(request, timeout.Token);
         response = new(1, id, LuxJson.Element(result), null);
@@ -90,8 +93,8 @@ while (true)
             ProviderException p => p.Message,
             ArgumentException a => a.Message,
             InvalidOperationException o => o.Message,
-            OperationCanceledException => "操作已取消或超时。远程任务可以从历史继续查询。",
-            _ => "本地操作未完成。请检查后台文件权限、网络与连接；不要重复提交未知结果的生成。"
+            OperationCanceledException => global::Lux3D.Core.LocalText.Get("Operation cancelled or timed out. Continue querying the remote task from history."),
+            _ => global::Lux3D.Core.LocalText.Get("The local operation did not complete. Check background file permissions, network and connection; do not resubmit a generation with an unknown result.")
         };
         response = new(1, id, null, message);
     }
@@ -109,7 +112,7 @@ async Task<object> Dispatch(RpcRequest request, CancellationToken ct)
     {
         Guid operationId = p.GetProperty("operationId").GetGuid();
         TaskRecord task = store.Get(operationId);
-        ApiKeyCredential credential = await GetKey(task.Region, ct) ?? throw new InvalidOperationException("请恢复原任务的 API Key 连接。");
+        ApiKeyCredential credential = await GetKey(task.Region, ct) ?? throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Restore the original task's API key connection."));
         return await workflow.RefreshAsync(new RestGenerationProvider(http, download, credential), operationId, ct);
     }
     LuxRegion selected = LuxRegions.Parse(p.GetProperty("region").GetString() ?? "");
@@ -119,11 +122,11 @@ async Task<object> Dispatch(RpcRequest request, CancellationToken ct)
         case "connection":
         {
             bool key = await GetKey(region, ct) is not null;
-            if (key) return new ConnectionInfo(region, true, "已配置区域 API Key；生成前请确认额度。", true);
+            if (key) return new ConnectionInfo(region, true, global::Lux3D.Core.LocalText.Get("Regional API key configured; check credits before generating."), true);
             OAuthToken? token = await GetToken(region, ct);
             bool oauth = token is not null && token.ExpiresAt > DateTimeOffset.UtcNow;
             return new ConnectionInfo(region, key || oauth,
-                key ? "已配置区域 API Key；生成前请确认额度。" : oauth ? "Manycore OAuth 已登录；生成 API 权限仍需独立验证或配置区域 API Key。" : "尚未连接。可登录 Manycore 或配置区域 API Key。", key);
+                key ? global::Lux3D.Core.LocalText.Get("Regional API key configured; check credits before generating.") : oauth ? global::Lux3D.Core.LocalText.Get("Signed in to Manycore OAuth; generation API permissions need separate verification or a regional API key.") : global::Lux3D.Core.LocalText.Get("Not connected. Sign in to Manycore or configure a regional API key."), key);
         }
         case "setKey":
         {
@@ -133,7 +136,7 @@ async Task<object> Dispatch(RpcRequest request, CancellationToken ct)
             if (persist) await credentials.SetAsync("api-key:" + region, p.GetProperty("apiKey").GetString()!, ct);
             else await credentials.DeleteAsync("api-key:" + region, ct);
             sessionKeys[region] = key;
-            return new ConnectionInfo(region, true, persist ? "API 连接验证通过，已保存至系统凭证存储。" : "API 连接验证通过，仅本次会话使用。", true);
+            return new ConnectionInfo(region, true, persist ? global::Lux3D.Core.LocalText.Get("API connection verified and saved to system credential storage.") : global::Lux3D.Core.LocalText.Get("API connection verified for this session only."), true);
         }
         case "login":
         {
@@ -149,20 +152,20 @@ async Task<object> Dispatch(RpcRequest request, CancellationToken ct)
             // User's OAuth session is recoverable; no token enters a task journal or Rhino document.
             await credentials.SetAsync("oauth:" + region, JsonSerializer.Serialize(token, LuxJson.Options), ct);
             OAuthMcpInspection inspection = await new OAuthMcpProbe(http).InspectAsync(token, ct);
-            return new ConnectionInfo(region, true, "Manycore OAuth 登录成功，凭证已保存至系统凭证存储。" + inspection.Message + " 当前生成使用区域 API Key。", await GetKey(region, ct) is not null);
+            return new ConnectionInfo(region, true, global::Lux3D.Core.LocalText.Get("Manycore OAuth sign-in succeeded; credentials were saved to system credential storage. ") + inspection.Message + global::Lux3D.Core.LocalText.Get(" Generation currently uses a regional API key."), await GetKey(region, ct) is not null);
         }
         case "logout":
             sessionKeys.Remove(region); sessionTokens.Remove(region);
             await credentials.DeleteAsync("api-key:" + region, ct);
             await credentials.DeleteAsync("oauth:" + region, ct);
-            return new ConnectionInfo(region, false, "本机连接已移除。远程授权可在官方账户页面管理。");
+            return new ConnectionInfo(region, false, global::Lux3D.Core.LocalText.Get("Local connection removed. Manage remote authorizations on the official account page."));
         case "generate":
         {
-            ApiKeyCredential credential = await GetKey(region, ct) ?? throw new InvalidOperationException("OAuth 登录不等于生成 API 已授权。请配置并验证该区域 API Key 后生成。");
-            GenerationInput input = p.GetProperty("input").Deserialize<GenerationInput>(LuxJson.Options) ?? throw new ArgumentException("输入为空。");
+            ApiKeyCredential credential = await GetKey(region, ct) ?? throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("OAuth sign-in does not authorize the generation API. Configure and verify the regional API key before generating."));
+            GenerationInput input = p.GetProperty("input").Deserialize<GenerationInput>(LuxJson.Options) ?? throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Input is empty."));
             return await workflow.GenerateAsync(new RestGenerationProvider(http, download, credential), input, ct);
         }
-        default: throw new ArgumentException("未知操作。");
+        default: throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Unknown operation."));
     }
 }
 async Task<ApiKeyCredential?> GetKey(string region, CancellationToken ct)

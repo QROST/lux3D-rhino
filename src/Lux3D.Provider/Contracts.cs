@@ -11,7 +11,7 @@ public static class LuxRegions
     {
         "cn" or "china" => LuxRegion.China,
         "global" or "international" or "com" => LuxRegion.International,
-        _ => throw new ArgumentException("请选择中国区或国际区。", nameof(value))
+        _ => throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Choose the China or Global region."), nameof(value))
     };
     public static string Name(LuxRegion region) => region == LuxRegion.China ? "cn" : "international";
     public static Uri ApiBase(LuxRegion region) => new(region == LuxRegion.China ? "https://api.aholo3d.cn/" : "https://api.aholo.ai/global/");
@@ -27,7 +27,7 @@ public sealed class ApiKeyCredential
     public ApiKeyCredential(LuxRegion region, string key)
     {
         if (string.IsNullOrWhiteSpace(key) || key.Length > 8192 || key.Any(char.IsControl) || key.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("API Key 无效；请使用所选区域的原始 API Key。", nameof(key));
+            throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Invalid API key. Use the original API key for the selected region."), nameof(key));
         Value = key.Trim(); Region = region;
         ConnectionId = LuxRegions.Name(region) + ":" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Value))).ToLowerInvariant();
     }
@@ -48,14 +48,14 @@ internal static class ProviderValidation
     public static string TaskId(string? value)
     {
         if (!long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out long id) || id < 1)
-            throw new ProviderException("invalid_task_id", "服务返回无效任务编号。");
+            throw new ProviderException("invalid_task_id", global::Lux3D.Core.LocalText.Get("The service returned an invalid task ID."));
         return id.ToString(CultureInfo.InvariantCulture);
     }
     public static Uri HttpsUri(string? value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.IsLoopback ||
             uri.HostNameType != UriHostNameType.Dns || !string.IsNullOrEmpty(uri.UserInfo) || uri.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase))
-            throw new ProviderException("invalid_url", "服务返回无效 HTTPS 资源地址。");
+            throw new ProviderException("invalid_url", global::Lux3D.Core.LocalText.Get("The service returned an invalid HTTPS asset URL."));
         return uri;
     }
 }

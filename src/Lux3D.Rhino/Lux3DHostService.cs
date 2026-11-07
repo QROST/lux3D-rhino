@@ -18,7 +18,7 @@ public sealed record PlacementIntent(Plane Plane, Point3d Point, double Height, 
         double sourceHeight = bounds.Max.Z - bounds.Min.Z;
         if (!bounds.IsValid || !Plane.IsValid || !Point.IsValid || !double.IsFinite(Height) ||
             Height <= 0 || !double.IsFinite(RotationDegrees) || !double.IsFinite(sourceHeight) || sourceHeight <= 1e-12)
-            throw new InvalidOperationException("放置平面、点、参考高度或源模型高度无效。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Invalid placement plane, point, reference height or source model height."));
         Point3d anchor = new((bounds.Min.X + bounds.Max.X) / 2, (bounds.Min.Y + bounds.Max.Y) / 2, bounds.Min.Z);
         Plane target = new(Point, Plane.XAxis, Plane.YAxis);
         return Transform.PlaneToPlane(Plane.WorldXY, target) *
@@ -49,10 +49,10 @@ public sealed class PreparedAsset : IDisposable
     internal void Verify()
     {
         if (!File.Exists(SnapshotPath))
-            throw new InvalidOperationException("预览资产已丢失或发生变化，请重新加载。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The preview asset is missing or changed. Reload it."));
         using var stream = File.OpenRead(SnapshotPath);
         if (!string.Equals(Convert.ToHexString(SHA256.HashData(stream)), Sha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("预览资产已丢失或发生变化，请重新加载。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The preview asset is missing or changed. Reload it."));
     }
     public void Dispose()
     {
@@ -71,7 +71,7 @@ public sealed class Lux3DHostService : IDisposable
     private readonly string? _importStoreRoot;
     public Lux3DHostService(string? importStoreRoot = null)
     {
-        if (importStoreRoot is not null && !Path.IsPathRooted(importStoreRoot)) throw new ArgumentException("导入资产目录必须为绝对路径。");
+        if (importStoreRoot is not null && !Path.IsPathRooted(importStoreRoot)) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("The imported asset directory must be an absolute path."));
         _importStoreRoot = importStoreRoot;
         RhinoDoc.DeleteRhinoObject += OnDeleted;
     }
@@ -85,7 +85,7 @@ public sealed class Lux3DHostService : IDisposable
     public void Dispose() { RhinoDoc.DeleteRhinoObject -= OnDeleted; }
     private static void RequireUiThread()
     {
-        if (global::Rhino.RhinoApp.InvokeRequired) throw new InvalidOperationException("Rhino 文档操作必须在 UI 线程执行。");
+        if (global::Rhino.RhinoApp.InvokeRequired) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Rhino document operations must run on the UI thread."));
     }
     public string Session(RhinoDoc doc)
     {
@@ -114,7 +114,7 @@ public sealed class Lux3DHostService : IDisposable
         RhinoDoc? stage = null;
         try
         {
-            stage = RhinoDoc.CreateHeadless(null) ?? throw new InvalidOperationException("无法创建独立预览文档。");
+            stage = RhinoDoc.CreateHeadless(null) ?? throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Could not create an independent preview document."));
             stage.ModelUnitSystem = target.ModelUnitSystem;
             stage.ModelAbsoluteTolerance = target.ModelAbsoluteTolerance;
             HashSet<Guid> existingDefinitions = stage.InstanceDefinitions.GetList(true).Select(d => d.Id).ToHashSet();
@@ -124,17 +124,17 @@ public sealed class Lux3DHostService : IDisposable
             catch (Exception ex)
             {
                 trace?.Record("preflight_native_import_exception", ex.Message);
-                throw new InvalidOperationException("预检阶段：Rhino 原生 GLB 导入发生异常，尚未进入网格修复。" + ex.Message, ex);
+                throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Preflight: Rhino's native GLB import threw an exception before mesh repair. ") + ex.Message, ex);
             }
             trace?.Record("preflight_native_import_result", imported ? "true" : "false");
-            if (!imported) throw new InvalidOperationException("预检阶段：Rhino 原生 GLB 导入失败，尚未进入网格修复。");
+            if (!imported) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Preflight: Rhino's native GLB import failed before mesh repair."));
             RhinoObject[] roots = Objects(stage);
             using MeshRepairs repairs = CreateMeshRepairs(roots, trace);
             ApplyDefinitionRepairs(stage, roots, repairs, existingDefinitions, trace);
             // Replacement may create a proxy undo record. It is confined to the disposable headless document.
             foreach (RhinoObject root in roots)
                 if (repairs.Meshes.TryGetValue(root.Id, out Mesh? repaired) && !stage.Objects.Replace(root.Id, repaired))
-                    throw new InvalidOperationException("预检阶段：无法替换已修复的临时网格。");
+                    throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Preflight: could not replace the repaired temporary mesh."));
             AssetAudit audit = Audit(Objects(stage)) with
             {
                 RemovedDegenerateFaces = repairs.RemovedFaces,
@@ -158,9 +158,9 @@ public sealed class Lux3DHostService : IDisposable
         RhinoObject[] matches = Objects(doc).Where(o => o.Attributes.GetUserString("Lux3D.ImportId") == importId.ToString("D")).ToArray();
         if (matches.Length == 0) return null;
         if (matches.Length != 1 || matches[0] is not InstanceObject)
-            throw new InvalidOperationException("文档内存在重复或无效的任务导入标记，请先核对已有对象。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The document has duplicate or invalid task import markers. Inspect existing objects first."));
         string? sha = matches[0].Attributes.GetUserString("Lux3D.AssetSha256");
-        if (string.IsNullOrWhiteSpace(sha)) throw new InvalidOperationException("文档已有导入对象，但资产校验标记缺失；未重复插入。");
+        if (string.IsNullOrWhiteSpace(sha)) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("An imported object already exists, but its asset verification marker is missing. No duplicate was inserted."));
         var receipt = new ImportReceipt(importId, matches[0].Id, Session(doc), sha, "Imported");
         _receipts[(doc.RuntimeSerialNumber, importId)] = receipt;
         return receipt;
@@ -168,7 +168,7 @@ public sealed class Lux3DHostService : IDisposable
     public ImportReceipt InspectReceipt(RhinoDoc doc, Guid importId)
     {
         if (!_receipts.TryGetValue((doc.RuntimeSerialNumber, importId), out ImportReceipt? receipt))
-            throw new InvalidOperationException("导入编号尚未提交。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The import ID has not been committed."));
         RhinoObject? obj = doc.Objects.FindId(receipt.ObjectId);
         string missing = _deletedStates.TryGetValue((doc.RuntimeSerialNumber, receipt.ObjectId), out string? observed) ? observed : "Missing";
         string state = obj is not null && !obj.IsDeleted && obj.Attributes.GetUserString("Lux3D.ImportId") == importId.ToString("D")
@@ -179,19 +179,19 @@ public sealed class Lux3DHostService : IDisposable
     {
         RequireUiThread();
         trace?.Record("commit_start");
-        if (importId == Guid.Empty) throw new ArgumentException("导入编号不能为空。", nameof(importId));
-        RhinoDoc doc = RhinoDoc.FromRuntimeSerialNumber(asset.DocumentSerial) ?? throw new InvalidOperationException("目标文档已关闭。");
-        if (Session(doc) != asset.DocumentSessionId) throw new InvalidOperationException("目标文档会话已失效。");
-        if (doc.ModelUnitSystem != asset.Staging.ModelUnitSystem) throw new InvalidOperationException("目标文档单位已改变，请重新预览。");
+        if (importId == Guid.Empty) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("The import ID cannot be empty."), nameof(importId));
+        RhinoDoc doc = RhinoDoc.FromRuntimeSerialNumber(asset.DocumentSerial) ?? throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The target document is closed."));
+        if (Session(doc) != asset.DocumentSessionId) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The target document session has expired."));
+        if (doc.ModelUnitSystem != asset.Staging.ModelUnitSystem) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The target document units changed. Preview again."));
         Transform plannedTransform = placement.ToTransform(asset.Audit.Bounds);
         string fingerprint = asset.Sha256 + "|" + string.Join("|", Enumerable.Range(0, 4).SelectMany(r => Enumerable.Range(0, 4).Select(c => plannedTransform[r, c].ToString("R", System.Globalization.CultureInfo.InvariantCulture))));
         if (_fingerprints.TryGetValue((doc.RuntimeSerialNumber, importId), out string? previous))
         {
-            if (previous != fingerprint) throw new InvalidOperationException("相同导入编号对应了不同资产或放置参数。");
+            if (previous != fingerprint) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The same import ID refers to different assets or placement settings."));
             if (_receipts.ContainsKey((doc.RuntimeSerialNumber, importId))) return InspectReceipt(doc, importId);
-            throw new InvalidOperationException("此导入已失败，不能自动重放；请核对文档后明确建立新导入。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("This import failed and cannot be replayed automatically. Inspect the document before explicitly creating a new import."));
         }
-        if (doc.UndoRecordingIsActive) throw new InvalidOperationException("请等待当前 Rhino 命令结束后接受候选。");
+        if (doc.UndoRecordingIsActive) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Finish the current Rhino command before accepting a candidate."));
         int targetLayerIndex = doc.Layers.CurrentLayerIndex;
         asset.Verify();
         string durableImportPath = PersistImportSnapshot(asset);
@@ -200,8 +200,8 @@ public sealed class Lux3DHostService : IDisposable
         HashSet<Guid> before = Objects(doc).Select(o => o.Id).ToHashSet();
         HashSet<Guid> definitionsBefore = doc.InstanceDefinitions.GetList(true).Select(d => d.Id).ToHashSet();
         string beforeState = DocumentState(doc);
-        uint undo = doc.BeginUndoRecord("接受 Lux3D 候选");
-        if (undo == 0) throw new InvalidOperationException("无法创建撤销记录，未导入。");
+        uint undo = doc.BeginUndoRecord(global::Lux3D.Core.LocalText.Get("Accept Lux3D candidate"));
+        if (undo == 0) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Could not create an undo record. Nothing was imported."));
         List<GeometryBase> geometry = new();
         List<ObjectAttributes> attributes = new();
         int definitionIndex = -1;
@@ -214,17 +214,17 @@ public sealed class Lux3DHostService : IDisposable
             using (var marker = new global::Rhino.Geometry.Point(Point3d.Origin))
             using (var markerAttributes = new ObjectAttributes())
                 definitionIndex = doc.InstanceDefinitions.Add("Lux3D_" + importId.ToString("N"), "Lux3D native GLB; SHA256 " + asset.Sha256, Point3d.Origin, new[] { marker }, new[] { markerAttributes });
-            if (definitionIndex < 0) throw new InvalidOperationException("创建 Lux3D Block 失败。");
+            if (definitionIndex < 0) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Could not create the Lux3D block."));
             trace?.Record("commit_native_import_start");
             bool importedNative;
             try { importedNative = doc.Import(durableImportPath, new ArchivableDictionary()); }
             catch (Exception ex)
             {
                 trace?.Record("commit_native_import_exception", ex.Message);
-                throw new InvalidOperationException("正式导入阶段：Rhino 原生 GLB 导入发生异常，尚未进入本次网格修复。" + ex.Message, ex);
+                throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Document import: Rhino's native GLB import threw an exception before mesh repair. ") + ex.Message, ex);
             }
             trace?.Record("commit_native_import_result", importedNative ? "true" : "false");
-            if (!importedNative) throw new InvalidOperationException("正式导入阶段：Rhino 原生 GLB 导入失败，尚未进入本次网格修复。");
+            if (!importedNative) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Document import: Rhino's native GLB import failed before mesh repair."));
             VerifyHash(durableImportPath, asset.Sha256);
             asset.Verify();
             RhinoObject[] added = Objects(doc).Where(o => !before.Contains(o.Id)).ToArray();
@@ -241,7 +241,7 @@ public sealed class Lux3DHostService : IDisposable
             if (imported.Meshes != asset.Audit.Meshes || imported.Vertices != asset.Audit.Vertices || imported.Triangles != asset.Audit.Triangles ||
                 !imported.Bounds.Min.EpsilonEquals(asset.Audit.Bounds.Min, doc.ModelAbsoluteTolerance) ||
                 !imported.Bounds.Max.EpsilonEquals(asset.Audit.Bounds.Max, doc.ModelAbsoluteTolerance))
-                throw new InvalidOperationException("导入几何与预览结果不一致。");
+                throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Imported geometry does not match the preview."));
             trace?.Record("commit_audit_complete", AuditDetail(imported));
             foreach (RhinoObject obj in added)
             {
@@ -250,7 +250,7 @@ public sealed class Lux3DHostService : IDisposable
                 attr.SetUserString("Lux3D.AssetSha256", asset.Sha256);
                 attributes.Add(attr);
             }
-            if (!doc.InstanceDefinitions.ModifyGeometry(definitionIndex, geometry, attributes)) throw new InvalidOperationException("写入 Lux3D Block 几何失败。");
+            if (!doc.InstanceDefinitions.ModifyGeometry(definitionIndex, geometry, attributes)) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Could not write Lux3D block geometry."));
             trace?.Record("commit_block_geometry_ready");
             using ObjectAttributes instanceAttributes = doc.CreateDefaultAttributes();
             instanceAttributes.Name = "Lux3D";
@@ -262,10 +262,10 @@ public sealed class Lux3DHostService : IDisposable
             instanceAttributes.SetUserString("Lux3D.DocumentSession", asset.DocumentSessionId);
             if (generationOperationId.HasValue) instanceAttributes.SetUserString("Lux3D.GenerationOperationId", generationOperationId.Value.ToString("D"));
             instanceId = doc.Objects.AddInstanceObject(definitionIndex, transform, instanceAttributes);
-            if (instanceId == Guid.Empty) throw new InvalidOperationException("放置 Lux3D Block 失败。");
+            if (instanceId == Guid.Empty) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Could not place the Lux3D block."));
             trace?.Record("commit_instance_added", instanceId.ToString("D"));
-            if (doc.Objects.Delete(added.Select(o => o.Id), true) != added.Length) throw new InvalidOperationException("无法移除本次导入的临时顶层对象。");
-            if (Objects(doc).Count(o => !before.Contains(o.Id)) != 1) throw new InvalidOperationException("导入生成了非预期顶层对象。");
+            if (doc.Objects.Delete(added.Select(o => o.Id), true) != added.Length) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Could not remove temporary top-level objects from this import."));
+            if (Objects(doc).Count(o => !before.Contains(o.Id)) != 1) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The import created unexpected top-level objects."));
         }
         catch (Exception ex) { failure = ex; }
         finally
@@ -285,10 +285,10 @@ public sealed class Lux3DHostService : IDisposable
                 restored = DocumentState(doc) == beforeState;
             }
             trace?.Record("commit_rollback_result", restored ? "restored" : "unconfirmed");
-            if (!restored) throw new InvalidOperationException("导入失败，自动回滚未能确认；请检查文档 Undo。", failure);
-            throw new InvalidOperationException("导入失败；本次文档修改已撤销。" + failure.Message, failure);
+            if (!restored) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Import failed and automatic rollback could not be confirmed. Inspect the document and Undo history."), failure);
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Import failed; this operation's document changes were undone. ") + failure.Message, failure);
         }
-        if (!undoEnded) throw new InvalidOperationException("导入对象已建立，但无法确认撤销记录；请检查文档，不要重复导入。");
+        if (!undoEnded) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The imported object exists, but its undo record could not be confirmed. Inspect the document; do not import again."));
         ImportReceipt receipt = new(importId, instanceId, asset.DocumentSessionId, asset.Sha256, "Imported");
         _receipts.Add((doc.RuntimeSerialNumber, importId), receipt);
         trace?.Record("commit_complete", instanceId.ToString("D"));
@@ -300,7 +300,7 @@ public sealed class Lux3DHostService : IDisposable
     {
         // Final native import must not depend on a candidate's disposable preview directory.
         string root = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(root)) throw new InvalidOperationException("无法定位本机持久资产目录。");
+        if (string.IsNullOrWhiteSpace(root)) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Could not locate the persistent local asset directory."));
         string directory = Path.Combine(_importStoreRoot ?? Path.Combine(root, "Lux3D-Rhino"), "host-imports", asset.Sha256.ToLowerInvariant());
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, "asset.glb");
@@ -323,7 +323,7 @@ public sealed class Lux3DHostService : IDisposable
     {
         using var stream = File.OpenRead(path);
         if (!string.Equals(Convert.ToHexString(SHA256.HashData(stream)), expected, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("持久导入资产校验失败；没有修改目标文档。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Persistent import asset verification failed; the target document was not changed."));
     }
     private static string DocumentState(RhinoDoc doc)
     {
@@ -368,13 +368,13 @@ public sealed class Lux3DHostService : IDisposable
                 if (obj.Geometry is Mesh mesh) yield return (mesh, frame.Transform, obj);
                 else if (obj is InstanceObject instance)
                 {
-                    InstanceDefinition definition = instance.InstanceDefinition ?? throw new InvalidOperationException("GLB Block 引用了不存在的定义。");
-                    if (!ancestry.Add(definition.Id)) throw new InvalidOperationException("GLB Block 存在循环引用。");
+                    InstanceDefinition definition = instance.InstanceDefinition ?? throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("A GLB block references a missing definition."));
+                    if (!ancestry.Add(definition.Id)) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("A GLB block contains a cyclic reference."));
                     Transform combined = frame.Transform * instance.InstanceXform;
-                    if (!combined.IsValid) throw new InvalidOperationException("GLB Block 变换无效。");
+                    if (!combined.IsValid) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Invalid GLB block transform."));
                     pending.Push((((IEnumerable<RhinoObject>)definition.GetObjects()).GetEnumerator(), combined, definition.Id));
                 }
-                else throw new InvalidOperationException("GLB 含不支持的非 Mesh 对象。");
+                else throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The GLB contains unsupported non-mesh objects."));
             }
         }
         finally { while (pending.Count > 0) pending.Pop().Objects.Dispose(); }
@@ -422,10 +422,10 @@ public sealed class Lux3DHostService : IDisposable
             bool normalsComputed = repaired.Normals.ComputeNormals();
             bool valid = repaired.IsValidWithLog(out string afterLog);
             if (!normalsComputed || !valid)
-                throw new InvalidOperationException("网格有限修复未通过有效性检查。原原因：" + beforeLog + " 修复后：" + afterLog);
+                throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Limited mesh repair did not pass validation. Original reason: ") + beforeLog + global::Lux3D.Core.LocalText.Get(" After repair: ") + afterLog);
             if (repaired.Vertices.Count != mesh.Vertices.Count || repaired.TextureCoordinates.Count != mesh.TextureCoordinates.Count ||
                 repaired.VertexColors.Count != mesh.VertexColors.Count || repaired.Faces.Count != mesh.Faces.Count - removedFaces)
-                throw new InvalidOperationException("网格修复产生了退化面清理和法向重算以外的变化，已拒绝应用。");
+                throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Mesh repair changed more than degenerate-face removal and normal recomputation; the repair was rejected."));
             return repaired;
         }
         catch { repaired.Dispose(); throw; }
@@ -448,7 +448,7 @@ public sealed class Lux3DHostService : IDisposable
                 if (member is InstanceObject instance) pending.Push(instance.InstanceDefinition);
             if (!members.Any(m => repairs.Meshes.ContainsKey(m.Id))) continue;
             if (protectedDefinitions.Contains(definition.Id))
-                throw new InvalidOperationException("本次导入引用了已有文档中的无效网格定义；未修改用户原有 Block，请先检查该定义。");
+                throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("This import references an invalid mesh definition already in the document. The existing block was not changed; inspect its definition first."));
             var geometry = new List<GeometryBase>();
             var attributes = new List<ObjectAttributes>();
             try
@@ -459,7 +459,7 @@ public sealed class Lux3DHostService : IDisposable
                     attributes.Add(member.Attributes.Duplicate());
                 }
                 if (!doc.InstanceDefinitions.ModifyGeometry(definition.Index, geometry, attributes))
-                    throw new InvalidOperationException("无法把已修复网格写入本次导入的新 Block 定义。");
+                    throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Could not write the repaired mesh into the newly imported block definition."));
                 trace?.Record("mesh_definition_repaired", definition.Id.ToString("D"));
             }
             finally
@@ -481,7 +481,7 @@ public sealed class Lux3DHostService : IDisposable
         foreach (var (mesh, transform, source) in Meshes(objects, Transform.Identity))
         {
             Mesh inspected = replacements is not null && replacements.TryGetValue(source.Id, out Mesh? repaired) ? repaired : mesh;
-            if (!inspected.IsValidWithLog(out string log)) throw new InvalidOperationException("GLB 网格无效：" + log);
+            if (!inspected.IsValidWithLog(out string log)) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Invalid GLB mesh: ") + log);
             count++;
             vertices = checked(vertices + inspected.Vertices.Count);
             triangles = checked(triangles + inspected.Faces.Sum(f => f.IsQuad ? 2L : 1L));
@@ -499,7 +499,7 @@ public sealed class Lux3DHostService : IDisposable
                 foreach (string path in renderMaterial.GetEmbeddedFilesList()) textures.Add(path);
             }
         }
-        if (count == 0 || !bounds.IsValid) throw new InvalidOperationException("GLB 没有可导入的有效网格。");
+        if (count == 0 || !bounds.IsValid) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The GLB contains no valid importable mesh."));
         return new AssetAudit(count, vertices, triangles, materials.Count, textures.Count, bounds);
     }
 }
@@ -530,7 +530,7 @@ public sealed class CandidatePreview : DisplayConduit, IDisposable
         if (!bounds.Transform(placementTransform) || !bounds.IsValid)
         {
             if (!ReferenceEquals(next, current)) next.Dispose();
-            throw new InvalidOperationException("候选预览变换后的包围盒无效。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Invalid transformed preview bounding box."));
         }
         uint previousDocument;
         lock (_sync)
@@ -626,7 +626,7 @@ public sealed class CandidatePreview : DisplayConduit, IDisposable
     private static void RequireUiThread()
     {
         if (global::Rhino.RhinoApp.InvokeRequired)
-            throw new InvalidOperationException("候选预览只能在 Rhino UI 线程更新或释放。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Candidate previews must be updated or released on Rhino's UI thread."));
     }
 
     private static void Redraw(uint documentSerial)
@@ -661,7 +661,7 @@ public sealed class CandidatePreview : DisplayConduit, IDisposable
                     {
                         // Bake only the asset's node transform, once. Placement
                         // scale/rotation/translation stays on the display stack.
-                        if (!mesh.Transform(transform)) throw new InvalidOperationException("候选网格的节点变换失败。");
+                        if (!mesh.Transform(transform)) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The candidate mesh node transform failed."));
                         bounds.Union(mesh.GetBoundingBox(true));
                         material = new DisplayMaterial(obj.GetMaterial(true));
                         items.Add((mesh, material));
@@ -669,7 +669,7 @@ public sealed class CandidatePreview : DisplayConduit, IDisposable
                     }
                     finally { try { mesh?.Dispose(); } finally { material?.Dispose(); } }
                 }
-                if (items.Count == 0 || !bounds.IsValid) throw new InvalidOperationException("候选没有可预览的网格。");
+                if (items.Count == 0 || !bounds.IsValid) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The candidate contains no previewable mesh."));
                 return new PreviewGeometry(asset, items.ToArray(), bounds);
             }
             catch
@@ -694,7 +694,7 @@ public sealed class CandidatePreview : DisplayConduit, IDisposable
                 try { item.Mesh.Dispose(); } catch (Exception ex) { failure ??= ex; }
                 try { item.Material.Dispose(); } catch (Exception ex) { failure ??= ex; }
             }
-            if (failure is not null) throw new InvalidOperationException("候选预览资源释放未完成。", failure);
+            if (failure is not null) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Candidate preview resources could not be fully released."), failure);
         }
     }
 }

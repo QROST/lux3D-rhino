@@ -18,7 +18,7 @@ public sealed class GlbImportSnapshot : IDisposable
         trace?.Record("preflight_container_valid");
         string sha = Convert.ToHexString(SHA256.HashData(bytes));
         if (expectedSha256 is not null && !string.Equals(sha, expectedSha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("GLB 哈希与任务记录不一致。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The GLB hash does not match the task record."));
         string directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Lux3D-Rhino", Guid.NewGuid().ToString("N"));
         try
         {

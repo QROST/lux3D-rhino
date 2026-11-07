@@ -3,6 +3,8 @@
 [English](readme.md) | 简体中文
 
 由 **CuriousArc · qrost** 开发的独立 Rhino 集成，非 Manycore、Aholo 或 McNeel 官方产品。支持 Manycore OAuth 登录、Lux3D 文字/单图任务、持久资产缓存、GLB 候选预览和独立 Block 放置。当前版本为 **0.1.4-beta.3**；本次 Yak 发行目标为 **macOS / Rhino 8.32+**。Windows 适配代码和构建入口已具备，实机验收及公开发行包待完成。
+界面默认使用英文。插件加载时优先读取 Rhino 界面语言；中文语言环境（含繁体中文区域）显示简体中文。无法取得 Rhino 语言时再读取系统界面语言，其他或未知语言使用英文。修改 Rhino 语言后请重启 Rhino。此规则也覆盖私有后台进程与 OAuth 回调页面；用户提示词、模型名称和存储标识不会翻译。数字格式保留用户区域设置。读取旧任务记录时会翻译已知的完整诊断消息；动态旧记录和无法识别的提供方消息保留原文。
+
 
 **当前版本生成模型需要所选区域的 API Key。Manycore OAuth 登录成功后仍需配置 API Key；也可以跳过插件内 OAuth 登录，直接配置 API Key。**
 

@@ -33,17 +33,17 @@ public sealed class Lux3DClient : IAsyncDisposable
             EnsureProcess();
             var id = Guid.NewGuid();
             string request = JsonSerializer.Serialize(new RpcRequest(1, id, method, LuxJson.Element(payload)), LuxJson.Options);
-            if (request.Length > 128 * 1024) throw new InvalidOperationException("请求过长。");
+            if (request.Length > 128 * 1024) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The request is too large."));
             await _process!.StandardInput.WriteLineAsync(request).ConfigureAwait(false);
             await _process.StandardInput.FlushAsync().ConfigureAwait(false);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(method == "login" ? TimeSpan.FromMinutes(6) : TimeSpan.FromMinutes(4));
             string line = await BoundedLine.ReadAsync(_process.StandardOutput, timeout.Token).ConfigureAwait(false)
-                ?? throw new IOException("Lux3D 后台进程已停止。任务可从历史恢复，请勿重复提交未知结果的生成。");
-            var response = JsonSerializer.Deserialize<RpcResponse>(line, LuxJson.Options) ?? throw new IOException("无效后台响应。");
-            if (response.Version != 1 || response.Id != id) throw new IOException("后台协议不匹配。");
+                ?? throw new IOException(global::Lux3D.Core.LocalText.Get("The Lux3D background process stopped. Recover the task from history; do not resubmit a generation with an unknown result."));
+            var response = JsonSerializer.Deserialize<RpcResponse>(line, LuxJson.Options) ?? throw new IOException(global::Lux3D.Core.LocalText.Get("Invalid background response."));
+            if (response.Version != 1 || response.Id != id) throw new IOException(global::Lux3D.Core.LocalText.Get("Background protocol mismatch."));
             if (response.Error is not null) throw new InvalidOperationException(response.Error);
-            return response.Result!.Value.Deserialize<T>(LuxJson.Options) ?? throw new IOException("后台响应为空。");
+            return response.Result!.Value.Deserialize<T>(LuxJson.Options) ?? throw new IOException(global::Lux3D.Core.LocalText.Get("The background response is empty."));
         }
         catch (Exception ex) when (ex is OperationCanceledException or IOException or JsonException)
         {
@@ -60,7 +60,7 @@ public sealed class Lux3DClient : IAsyncDisposable
         string executable = Path.Combine(_directory, OperatingSystem.IsWindows() ? "Lux3D.Sidecar.exe" : "Lux3D.Sidecar");
         string dll = Path.Combine(_directory, "Lux3D.Sidecar.dll");
         bool standalone = File.Exists(executable);
-        if (!standalone && !File.Exists(dll)) throw new IOException("Lux3D 后台文件缺失，请重新安装完整插件包。");
+        if (!standalone && !File.Exists(dll)) throw new IOException(global::Lux3D.Core.LocalText.Get("Lux3D background files are missing. Reinstall the complete plugin package."));
         var start = new ProcessStartInfo(standalone ? executable : SidecarRuntime.FindDotNet8())
         {
             WorkingDirectory = _directory, UseShellExecute = false, CreateNoWindow = true,
@@ -69,11 +69,12 @@ public sealed class Lux3DClient : IAsyncDisposable
             StandardOutputEncoding = new UTF8Encoding(false),
             StandardErrorEncoding = new UTF8Encoding(false)
         };
+        start.Environment[LocalText.LanguageEnvironmentVariable] = LocalText.Language;
         if (!standalone) start.ArgumentList.Add(dll);
-        try { _process = Process.Start(start) ?? throw new IOException("无法启动 Lux3D 后台进程。"); }
+        try { _process = Process.Start(start) ?? throw new IOException(global::Lux3D.Core.LocalText.Get("Could not start the Lux3D background process.")); }
         catch (System.ComponentModel.Win32Exception)
         {
-            throw new IOException("无法启动 Lux3D 后台进程。请检查安装文件权限及适用于本机的 .NET 8 Runtime。");
+            throw new IOException(global::Lux3D.Core.LocalText.Get("Could not start the Lux3D background process. Check file permissions and the .NET 8 Runtime for this machine."));
         }
         // Drain diagnostics without copying provider responses or secrets into Rhino logs.
         _process.ErrorDataReceived += (_, _) => { };

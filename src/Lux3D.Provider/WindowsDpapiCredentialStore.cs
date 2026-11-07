@@ -46,10 +46,10 @@ public sealed class WindowsDpapiCredentialStore : ICredentialStore
                 // Files receive their protected ACL at CreateNew; a read-only handle must not
                 // attempt WRITE_DAC/WRITE_OWNER. Share.Delete permits another process to atomically
                 // replace the pathname while this read continues against its complete old snapshot.
-                if (stream.Length is <= 0 or > MaximumEncryptedBytes) throw Error("Windows 凭证文件大小无效，请重新登录。");
+                if (stream.Length is <= 0 or > MaximumEncryptedBytes) throw Error(global::Lux3D.Core.LocalText.Get("Invalid Windows credential file size. Sign in again."));
                 encrypted = new byte[checked((int)stream.Length)];
                 await stream.ReadExactlyAsync(encrypted, cancellationToken).ConfigureAwait(false);
-                if (stream.ReadByte() != -1) throw Error("Windows 凭证文件在读取时发生变化。");
+                if (stream.ReadByte() != -1) throw Error(global::Lux3D.Core.LocalText.Get("The Windows credential file changed while being read."));
             }
             byte[]? plain = null;
             try
@@ -69,8 +69,8 @@ public sealed class WindowsDpapiCredentialStore : ICredentialStore
         Check(account, cancellationToken); ArgumentNullException.ThrowIfNull(secret);
         int byteCount;
         try { byteCount = Utf8.GetByteCount(secret); }
-        catch (EncoderFallbackException) { throw Error("凭证包含无效文本编码。"); }
-        if (byteCount is <= 0 or > MaximumSecretBytes) throw Error("凭证必须介于 1 字节和 1 MiB 之间；不会截断或保存超限凭证。");
+        catch (EncoderFallbackException) { throw Error(global::Lux3D.Core.LocalText.Get("The credential contains invalid text encoding.")); }
+        if (byteCount is <= 0 or > MaximumSecretBytes) throw Error(global::Lux3D.Core.LocalText.Get("Credentials must be between 1 byte and 1 MiB; oversized values will not be truncated or stored."));
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         string? temporary = null; byte[]? plain = null; byte[]? encrypted = null;
         try
@@ -94,7 +94,7 @@ public sealed class WindowsDpapiCredentialStore : ICredentialStore
             IsRegularPath(destination, directory: false, allowMissing: true);
             // Same-directory rename replaces the previous complete ciphertext. No copy/delete fallback.
             // MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH; never COPY_ALLOWED.
-            if (!MoveFileExW(temporary, destination, 0x1 | 0x8)) throw NativeError("写入");
+            if (!MoveFileExW(temporary, destination, 0x1 | 0x8)) throw NativeError(global::Lux3D.Core.LocalText.Get("write"));
             temporary = null;
         }
         catch (Exception ex) when (IsStorageFailure(ex)) { throw StorageError(ex); }
@@ -126,12 +126,12 @@ public sealed class WindowsDpapiCredentialStore : ICredentialStore
     private string? GetDirectory(bool create)
     {
         string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(local) || !Path.IsPathFullyQualified(local)) throw Error("Windows LocalAppData 目录不可用。");
+        if (string.IsNullOrWhiteSpace(local) || !Path.IsPathFullyQualified(local)) throw Error(global::Lux3D.Core.LocalText.Get("Windows LocalAppData is unavailable."));
         local = Path.GetFullPath(local);
         string root = Path.GetPathRoot(local)!;
-        if (root.StartsWith("\\\\", StringComparison.Ordinal)) throw Error("Windows 凭证需要本地用户目录，暂不支持网络重定向目录。");
-        if (!GetVolumeInformationW(root, IntPtr.Zero, 0, IntPtr.Zero, IntPtr.Zero, out uint flags, IntPtr.Zero, 0)) throw NativeError("检查存储卷");
-        if ((flags & 0x8) == 0) throw Error("Windows 凭证目录所在文件系统不支持持久 ACL，不能安全保存凭证。");
+        if (root.StartsWith("\\\\", StringComparison.Ordinal)) throw Error(global::Lux3D.Core.LocalText.Get("Windows credentials require a local user directory; network-redirected directories are not supported."));
+        if (!GetVolumeInformationW(root, IntPtr.Zero, 0, IntPtr.Zero, IntPtr.Zero, out uint flags, IntPtr.Zero, 0)) throw NativeError(global::Lux3D.Core.LocalText.Get("volume check"));
+        if ((flags & 0x8) == 0) throw Error(global::Lux3D.Core.LocalText.Get("The credential directory's filesystem does not support persistent ACLs; credentials cannot be stored securely."));
         // Reject junctions/symlinks/mount points in the actual profile path before following them.
         for (DirectoryInfo? part = new(local); part is not null; part = part.Parent)
             IsRegularPath(part.FullName, directory: true, allowMissing: false);
@@ -154,7 +154,7 @@ public sealed class WindowsDpapiCredentialStore : ICredentialStore
     private static SecurityIdentifier CurrentUser()
     {
         using var identity = WindowsIdentity.GetCurrent();
-        return identity.User ?? throw Error("无法确定 Windows 当前用户身份。");
+        return identity.User ?? throw Error(global::Lux3D.Core.LocalText.Get("Could not determine the current Windows user identity."));
     }
     private static DirectorySecurity DirectoryAcl(SecurityIdentifier owner)
     {
@@ -177,7 +177,7 @@ public sealed class WindowsDpapiCredentialStore : ICredentialStore
         catch (FileNotFoundException) when (allowMissing) { return false; }
         catch (DirectoryNotFoundException) when (allowMissing) { return false; }
         if ((attributes & FileAttributes.ReparsePoint) != 0 || ((attributes & FileAttributes.Directory) != 0) != directory)
-            throw Error("Windows 凭证路径包含链接或不符合预期的文件类型，已停止访问。");
+            throw Error(global::Lux3D.Core.LocalText.Get("The Windows credential path contains a link or an unexpected file type; access was stopped."));
         return true;
     }
     private static string AccountPath(string directory, string account) => Path.Combine(directory, Hash(account) + ".dpapi");
@@ -192,11 +192,11 @@ public sealed class WindowsDpapiCredentialStore : ICredentialStore
     }
     private static string DecodePayload(byte[] payload)
     {
-        if (payload.Length < 45 || !payload.AsSpan(0, 8).SequenceEqual(PayloadMagic)) throw Error("Windows 凭证格式无效，请重新登录。");
+        if (payload.Length < 45 || !payload.AsSpan(0, 8).SequenceEqual(PayloadMagic)) throw Error(global::Lux3D.Core.LocalText.Get("Invalid Windows credential format. Sign in again."));
         int length = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(8, 4));
-        if (length is <= 0 or > MaximumSecretBytes || payload.Length != 12 + length + SHA256.HashSizeInBytes) throw Error("Windows 凭证长度无效，请重新登录。");
+        if (length is <= 0 or > MaximumSecretBytes || payload.Length != 12 + length + SHA256.HashSizeInBytes) throw Error(global::Lux3D.Core.LocalText.Get("Invalid Windows credential length. Sign in again."));
         Span<byte> digest = stackalloc byte[SHA256.HashSizeInBytes]; SHA256.HashData(payload.AsSpan(0, 12 + length), digest);
-        if (!CryptographicOperations.FixedTimeEquals(digest, payload.AsSpan(12 + length))) throw Error("Windows 凭证完整性检查失败，请重新登录。");
+        if (!CryptographicOperations.FixedTimeEquals(digest, payload.AsSpan(12 + length))) throw Error(global::Lux3D.Core.LocalText.Get("Windows credential integrity check failed. Sign in again."));
         return Utf8.GetString(payload.AsSpan(12, length));
     }
     private byte[] Transform(byte[] input, string account, bool protect)
@@ -214,8 +214,8 @@ public sealed class WindowsDpapiCredentialStore : ICredentialStore
             // CRYPTPROTECT_UI_FORBIDDEN only; never CRYPTPROTECT_LOCAL_MACHINE.
             bool ok = protect ? CryptProtectData(ref data, null, ref extra, IntPtr.Zero, IntPtr.Zero, 0x1, out output)
                 : CryptUnprotectData(ref data, IntPtr.Zero, ref extra, IntPtr.Zero, IntPtr.Zero, 0x1, out output);
-            if (!ok) throw NativeError(protect ? "加密" : "解密（可能已更换 Windows 用户或用户配置文件）");
-            if (output.Data == IntPtr.Zero || output.Length is 0 or > MaximumEncryptedBytes) throw Error("Windows DPAPI 返回了无效数据长度。");
+            if (!ok) throw NativeError(protect ? global::Lux3D.Core.LocalText.Get("encryption") : global::Lux3D.Core.LocalText.Get("decryption (the Windows user or profile may have changed)"));
+            if (output.Data == IntPtr.Zero || output.Length is 0 or > MaximumEncryptedBytes) throw Error(global::Lux3D.Core.LocalText.Get("Windows DPAPI returned an invalid data length."));
             byte[] result = new byte[checked((int)output.Length)]; Marshal.Copy(output.Data, result, 0, result.Length); return result;
         }
         finally
@@ -244,16 +244,16 @@ public sealed class WindowsDpapiCredentialStore : ICredentialStore
     private static void Check(string account, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("DPAPI 凭证存储仅可在 Windows 使用。");
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException(global::Lux3D.Core.LocalText.Get("DPAPI credential storage is available only on Windows."));
         ValidateName(account, nameof(account));
     }
     private static void ValidateName(string value, string argument)
     {
-        if (string.IsNullOrWhiteSpace(value) || value.Length > 4096 || value.Any(char.IsControl)) throw new ArgumentException("凭证服务或账户标识无效。", argument);
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 4096 || value.Any(char.IsControl)) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Invalid credential service or account identifier."), argument);
     }
     private static bool IsStorageFailure(Exception ex) => ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or CryptographicException or DecoderFallbackException;
-    private static ProviderException StorageError(Exception ex) => Error($"Windows 安全凭证存储访问失败 ({ex.GetType().Name})；请检查当前用户权限或重新登录。");
-    private static ProviderException NativeError(string action) => Error($"Windows 凭证{action}失败 (Win32 {Marshal.GetLastWin32Error()})。");
+    private static ProviderException StorageError(Exception ex) => Error(global::Lux3D.Core.LocalText.Format("Windows secure credential storage access failed ({0}); check current-user permissions or sign in again.", ex.GetType().Name));
+    private static ProviderException NativeError(string action) => Error(global::Lux3D.Core.LocalText.Format("Windows credential {0} failed (Win32 {1}).", action, Marshal.GetLastWin32Error()));
     private static ProviderException Error(string message) => new("windows_credential_store", message);
 
     [StructLayout(LayoutKind.Sequential)] private struct DataBlob { public uint Length; public IntPtr Data; }

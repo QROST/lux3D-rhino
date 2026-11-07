@@ -26,7 +26,7 @@ public sealed class Workflow
         ValidateInput(input);
         using var mutation = _store.LockMutation();
         if (_store.HasUnknownSubmissions() && !input.AcknowledgeUnknownSubmission)
-            throw new InvalidOperationException("存在提交结果未知的任务。请核对原账户历史，并明确确认再次生成可能重复扣费。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("A task has an unknown submission result. Check the original account's history and explicitly confirm that another generation may incur a duplicate charge."));
         string? image = null;
         string inputHash;
         if (!string.IsNullOrWhiteSpace(input.ImagePath))
@@ -43,7 +43,7 @@ public sealed class Workflow
         try
         {
             string id = await provider.CreateAsync(input, ct).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(id)) throw new IOException("创建响应没有可靠任务编号。");
+            if (string.IsNullOrWhiteSpace(id)) throw new IOException(global::Lux3D.Core.LocalText.Get("The creation response contains no reliable task ID."));
             task = task with { TaskId = id, State = "Queued" };
             _store.Save(task);
             return task;
@@ -57,7 +57,7 @@ public sealed class Workflow
         catch (Exception)
         {
             // Do not echo remote bodies, signed URLs or credentials. Never retry POST.
-            task = task with { State = "SubmissionUnknown", Error = "未取得可靠创建回执。请在原区域核对任务历史；再次生成可能重复扣费。" };
+            task = task with { State = "SubmissionUnknown", Error = global::Lux3D.Core.LocalText.Get("No reliable creation receipt was received. Check the original region's task history; another generation may incur a duplicate charge.") };
             _store.Save(task);
             return task;
         }
@@ -67,15 +67,15 @@ public sealed class Workflow
         using var mutation = _store.LockMutation();
         TaskRecord task = _store.Get(operationId);
         if (task.Region != provider.Region || task.ConnectionId != provider.ConnectionId)
-            throw new InvalidOperationException("请恢复该任务提交时的区域和连接；不能改用另一个账户查询。");
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Restore the region and connection used to submit this task; it cannot be queried with another account."));
         if (task.TaskId is null)
-            return task with { State = "SubmissionUnknown", Error = "缺少任务编号，禁止自动重新提交。请核对原账户历史。" };
+            return task with { State = "SubmissionUnknown", Error = global::Lux3D.Core.LocalText.Get("The task ID is missing; automatic resubmission is disabled. Check the original account's history.") };
         if (task.State == "Ready" && task.AssetPath is not null && File.Exists(task.AssetPath))
         {
             await using var cached = File.OpenRead(task.AssetPath);
             string hash = Convert.ToHexString(await SHA256.HashDataAsync(cached, ct).ConfigureAwait(false)).ToLowerInvariant();
             if (hash == task.AssetSha256) return task;
-            task = task with { State = "Missing", Error = "资产哈希不一致，重新获取原任务结果。" };
+            task = task with { State = "Missing", Error = global::Lux3D.Core.LocalText.Get("The asset hash differs; retrieving the original task result again.") };
         }
         bool succeeded = task.State is "Succeeded" or "DownloadFailed" or "Downloading";
         byte[]? downloaded = null;
@@ -86,7 +86,7 @@ public sealed class Workflow
             _store.Save(task);
             succeeded = remote.State == "Succeeded";
             if (!succeeded) return task;
-            if (remote.GlbUri is null) throw new IOException("成功任务没有 GLB 结果。");
+            if (remote.GlbUri is null) throw new IOException(global::Lux3D.Core.LocalText.Get("The successful task contains no GLB result."));
             task = task with { State = "Downloading" }; _store.Save(task);
             downloaded = await provider.DownloadAsync(remote.GlbUri, ct).ConfigureAwait(false);
             var asset = _store.StoreAsset(downloaded);
@@ -99,7 +99,7 @@ public sealed class Workflow
             // Keep the exact structural validation cause; geometry counts are not rejection criteria.
             string detail = ex.Message.Length <= 512 ? ex.Message : ex.Message[..512];
             task = task with { State = "Rejected", AssetPath = null, AssetSha256 = null,
-                ValidationCode = ex.Code, Error = $"生成已完成，本地 GLB 校验未通过（{ex.Code}）：{detail} 可重试获取原任务，不必重新生成。" };
+                ValidationCode = ex.Code, Error = global::Lux3D.Core.LocalText.Format("Generation finished, but local GLB validation failed ({0}): {1} Retry retrieving the original task; no new generation is needed.", ex.Code, detail) };
             if (downloaded is not null)
             {
                 try
@@ -108,27 +108,27 @@ public sealed class Workflow
                     task = task with { RejectedAssetPath = rejected.Path, RejectedAssetSha256 = rejected.Hash };
                 }
                 catch (Exception io) when (io is IOException or UnauthorizedAccessException)
-                { task = task with { Error = task.Error + " 未能保留诊断副本。" }; }
+                { task = task with { Error = task.Error + global::Lux3D.Core.LocalText.Get(" A diagnostic copy could not be retained.") }; }
             }
         }
         catch (OutOfMemoryException)
         {
             task = task with { State = succeeded ? "DownloadFailed" : "StatusUnknown",
-                Error = "当前系统内存不足，无法完成原任务结果的下载或读取；这不是模型格式无效。释放内存后可恢复原任务，无需重新生成。" };
+                Error = global::Lux3D.Core.LocalText.Get("There is not enough memory to download or read the original result. This does not mean the format is invalid. Free memory and recover the original task without regenerating.") };
         }
         catch (Exception)
         {
-            task = task with { State = succeeded ? "DownloadFailed" : "StatusUnknown", Error = succeeded ? "远程生成已完成，下载未完成。可重试查询与下载，不会重新创建任务。" : "查询暂不可用；可继续查询原任务，不会重新创建。" };
+            task = task with { State = succeeded ? "DownloadFailed" : "StatusUnknown", Error = succeeded ? global::Lux3D.Core.LocalText.Get("Remote generation finished, but the download did not. Retry querying and downloading; no new task will be created.") : global::Lux3D.Core.LocalText.Get("The status query is temporarily unavailable. Query the original task again; no new task will be created.") };
         }
         _store.Save(task);
         return task;
     }
     private static void ValidateInput(GenerationInput input)
     {
-        if (string.IsNullOrWhiteSpace(input.Prompt) && string.IsNullOrWhiteSpace(input.ImagePath)) throw new ArgumentException("请输入文字或选择一张 PNG/JPEG 图片。");
-        if (!string.IsNullOrWhiteSpace(input.Prompt) && !string.IsNullOrWhiteSpace(input.ImagePath)) throw new ArgumentException("文字和单图请选择一种输入；请清空另一项。");
-        if (input.Prompt.Length > 4000) throw new ArgumentException("提示词过长（上限 4000 字符）。");
-        if (input.FaceCount is < 10000 or > 300000) throw new ArgumentException("目标面数应在 10000 到 300000 之间。");
-        if (input.Model is not ("G1" or "G1-Turbo")) throw new ArgumentException("不支持的模型版本。");
+        if (string.IsNullOrWhiteSpace(input.Prompt) && string.IsNullOrWhiteSpace(input.ImagePath)) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Enter text or choose one PNG/JPEG image."));
+        if (!string.IsNullOrWhiteSpace(input.Prompt) && !string.IsNullOrWhiteSpace(input.ImagePath)) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Choose either text or one image; clear the other input."));
+        if (input.Prompt.Length > 4000) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("The prompt is too long (maximum 4000 characters)."));
+        if (input.FaceCount is < 10000 or > 300000) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Target face count must be between 10000 and 300000."));
+        if (input.Model is not ("G1" or "G1-Turbo")) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Unsupported model version."));
     }
 }

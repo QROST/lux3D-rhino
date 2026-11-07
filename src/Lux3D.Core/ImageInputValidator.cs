@@ -5,13 +5,13 @@ public static class ImageInputValidator
 {
     public static string Validate(byte[] bytes)
     {
-        if (bytes.Length is < 24 or > 20_000_000) throw new ArgumentException("图片大小不支持。");
+        if (bytes.Length is < 24 or > 20_000_000) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Unsupported image size."));
         int width = 0, height = 0;
         string extension;
         if (bytes.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }))
         {
             extension = ".png";
-            if (!bytes.AsSpan(12, 4).SequenceEqual("IHDR"u8)) throw new ArgumentException("PNG 头无效。");
+            if (!bytes.AsSpan(12, 4).SequenceEqual("IHDR"u8)) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Invalid PNG header."));
             width = BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(16)); height = BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(20));
         }
         else if (bytes[0] == 0xff && bytes[1] == 0xd8)
@@ -32,9 +32,9 @@ public static class ImageInputValidator
                 p += length;
             }
         }
-        else throw new ArgumentException("仅支持 PNG/JPEG 图片。");
+        else throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Only PNG/JPEG images are supported."));
         if (width < 1 || height < 1 || width > 8192 || height > 8192 || (long)width * height > 32_000_000)
-            throw new ArgumentException("图片尺寸无效，单边上限 8192，像素总数上限 3200 万。");
+            throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Invalid image dimensions; maximum side length is 8192 pixels and total size is 32 megapixels."));
         return extension;
     }
 }

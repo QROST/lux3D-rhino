@@ -76,7 +76,7 @@ public sealed class WorkflowTests : IDisposable
         var created = await workflow.GenerateAsync(_provider, new("chair"));
         var failed = await workflow.RefreshAsync(_provider, created.OperationId);
         Assert.Equal("DownloadFailed", failed.State);
-        Assert.Contains("内存不足", failed.Error);
+        Assert.Contains("not enough memory", failed.Error);
         Assert.Null(failed.ValidationCode);
         Assert.Equal(created.TaskId, failed.TaskId);
         _provider.ResourceFailure = false;

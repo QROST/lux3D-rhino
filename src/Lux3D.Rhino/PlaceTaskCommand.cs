@@ -12,11 +12,11 @@ public sealed class PlaceTaskCommand : Command
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
         using var input = new GetString();
-        input.SetCommandPrompt("Lux3D 任务操作编号（只读取/恢复原任务，不重新生成）");
+        input.SetCommandPrompt(global::Lux3D.Core.LocalText.Get("Lux3D task operation ID (read/recover the original task; never regenerate)"));
         if (input.Get() != global::Rhino.Input.GetResult.String) return Result.Cancel;
         if (!Guid.TryParse(input.StringResult(), out Guid operationId) || operationId == Guid.Empty)
         {
-            global::Rhino.RhinoApp.WriteLine("操作编号无效；请从 Lux3D 任务详情复制完整 GUID。");
+            global::Rhino.RhinoApp.WriteLine(global::Lux3D.Core.LocalText.Get("Invalid operation ID. Copy the full GUID from Lux3D task details."));
             return Result.Failure;
         }
         TaskPlacementService service = Lux3DPlugin.Instance.Placement;
@@ -31,7 +31,7 @@ public sealed class PlaceTaskCommand : Command
             _ = CompleteAsync(service, operationId, target);
         };
         global::Rhino.RhinoApp.Idle += start;
-        global::Rhino.RhinoApp.WriteLine("正在读取原任务并准备放入；请保持当前文档打开。完成结果会显示在命令行。");
+        global::Rhino.RhinoApp.WriteLine(global::Lux3D.Core.LocalText.Get("Reading the original task and preparing placement. Keep this document open; the result will appear in the command line."));
         return Result.Success;
     }
     private static async Task CompleteAsync(TaskPlacementService service, Guid operationId, TaskPlacementTarget target)

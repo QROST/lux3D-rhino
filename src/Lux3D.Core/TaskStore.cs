@@ -20,22 +20,23 @@ public sealed class TaskStore
     public TaskRecord Get(Guid id)
     {
         string path = PathFor(id);
-        if (!File.Exists(path)) throw new IOException("任务记录缺失或过大。");
+        if (!File.Exists(path)) throw new IOException(global::Lux3D.Core.LocalText.Get("The task record is missing or too large."));
         // Readers keep their original snapshot while another process atomically replaces the file.
         // Windows requires delete sharing for that replacement; length and content use one handle.
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-        if (stream.Length > 128 * 1024) throw new IOException("任务记录缺失或过大。");
+        if (stream.Length > 128 * 1024) throw new IOException(global::Lux3D.Core.LocalText.Get("The task record is missing or too large."));
         using var reader = new StreamReader(stream);
-        return JsonSerializer.Deserialize<TaskRecord>(reader.ReadToEnd(), LuxJson.Options) ?? throw new IOException("任务记录损坏。");
+        TaskRecord record = JsonSerializer.Deserialize<TaskRecord>(reader.ReadToEnd(), LuxJson.Options) ?? throw new IOException(global::Lux3D.Core.LocalText.Get("The task record is corrupt."));
+        return record with { Error = LocalText.RecordedMessage(record.Error) };
     }
     private IEnumerable<TaskRecord> Records() => Directory.EnumerateFiles(Path.Combine(Root, "tasks"), "*.json")
         .Select(p => Get(Guid.ParseExact(Path.GetFileNameWithoutExtension(p), "N")))
-        .Select(t => t.State is "Submitting" or "Uploading" ? t with { State = "SubmissionUnknown", Error = "上次提交中断，禁止自动重提；请核对提供方任务历史。" } :
-            t.State == "Ready" && !File.Exists(t.AssetPath) ? t with { State = "Missing", Error = "本地资产已丢失，可尝试重新查询下载。" } : t)
+        .Select(t => t.State is "Submitting" or "Uploading" ? t with { State = "SubmissionUnknown", Error = global::Lux3D.Core.LocalText.Get("The previous submission was interrupted. Automatic resubmission is disabled; check the provider's task history.") } :
+            t.State == "Ready" && !File.Exists(t.AssetPath) ? t with { State = "Missing", Error = global::Lux3D.Core.LocalText.Get("The local asset is missing. Query the original task to download it again.") } : t)
         .OrderByDescending(t => t.CreatedAt);
     public TaskRecord[] List(int offset = 0, int limit = 30)
     {
-        if (offset < 0 || limit is < 1 or > 30) throw new ArgumentOutOfRangeException(nameof(limit), "历史每页 1 到 30 条。");
+        if (offset < 0 || limit is < 1 or > 30) throw new ArgumentOutOfRangeException(nameof(limit), global::Lux3D.Core.LocalText.Get("History pages must contain 1 to 30 records."));
         return Records().Skip(offset).Take(limit).ToArray();
     }
     public bool HasUnknownSubmissions() => Records().Any(t => t.State == "SubmissionUnknown");
@@ -80,7 +81,7 @@ public sealed class TaskStore
     public (string Path, string Hash) SnapshotImage(string path)
     {
         var info = new FileInfo(path);
-        if (!info.Exists || info.Length is < 24 or > 20_000_000) throw new ArgumentException("图片须为 20 MB 以内的 PNG/JPEG。");
+        if (!info.Exists || info.Length is < 24 or > 20_000_000) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Use a PNG/JPEG image of at most 20 MB."));
         byte[] data = File.ReadAllBytes(path);
         string extension = ImageInputValidator.Validate(data);
         string hash = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();

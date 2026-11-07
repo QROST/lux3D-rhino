@@ -23,7 +23,7 @@ public sealed class Lux3DApiClient
 
     public Task<string> CreateTextAsync(string prompt, string model = "G1-Turbo", int faceCount = 50000, bool enablePbr = true, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > 4000) throw new ArgumentException("请输入 1–4000 字符的描述。", nameof(prompt));
+        if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > 4000) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Enter a description of 1–4000 characters."), nameof(prompt));
         var body = GenerationBody(model, faceCount, enablePbr); body["prompt"] = prompt.Trim();
         return CreateAsync("text-to-3d", body, cancellationToken);
     }
@@ -34,8 +34,8 @@ public sealed class Lux3DApiClient
     }
     private static Dictionary<string, object> GenerationBody(string model, int faceCount, bool pbr)
     {
-        if (model is not ("G1" or "G1-Turbo")) throw new ArgumentException("模型必须是 G1 或 G1-Turbo。", nameof(model));
-        if (faceCount is < 10000 or > 300000) throw new ArgumentOutOfRangeException(nameof(faceCount), "目标面数必须在 10000–300000 之间。");
+        if (model is not ("G1" or "G1-Turbo")) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("The model must be G1 or G1-Turbo."), nameof(model));
+        if (faceCount is < 10000 or > 300000) throw new ArgumentOutOfRangeException(nameof(faceCount), global::Lux3D.Core.LocalText.Get("Target face count must be between 10000 and 300000."));
         var body = new Dictionary<string, object> { ["version"] = model, ["faceCount"] = faceCount, ["outputFormat"] = new[] { "glb" }, ["aiPredictSize"] = false };
         // G1 always provides a PBR GLB; its contract forbids the enablePbr field.
         if (model == "G1-Turbo") body["enablePbr"] = pbr;
@@ -51,7 +51,7 @@ public sealed class Lux3DApiClient
             return ProviderValidation.TaskId(Scalar(data));
         }
         catch (ProviderException ex) when (!ex.SubmissionMayHaveSucceeded && ex.Code == "invalid_task_id")
-        { throw new ProviderException("submission_unknown", "生成请求的结果不明确。请核对任务历史，勿重复提交。", true); }
+        { throw new ProviderException("submission_unknown", global::Lux3D.Core.LocalText.Get("The generation request has an unknown result. Check task history; do not resubmit."), true); }
     }
     public async Task<ProviderTask> GetTaskAsync(string taskId, CancellationToken cancellationToken = default)
     {
@@ -60,7 +60,7 @@ public sealed class Lux3DApiClient
         var data = await SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (data.ValueKind != JsonValueKind.Object || !data.TryGetProperty("taskId", out var id) || ProviderValidation.TaskId(Scalar(id)) != canonical ||
             !data.TryGetProperty("bizId", out var biz) || biz.GetString() != "LUX_3D" || !data.TryGetProperty("status", out var state) || !state.TryGetInt32(out int status))
-            throw new ProviderException("invalid_task", "任务响应的身份或状态不匹配。");
+            throw new ProviderException("invalid_task", global::Lux3D.Core.LocalText.Get("The task response identity or state does not match."));
         string localState = status switch { 0 => "queued", 1 or 2 => "running", 3 => "succeeded", 4 or 5 => "failed", 6 => "cancelled", _ => "unknown" };
         if (status != 3) return new(canonical, status, localState, null);
         try { return new(canonical, status, localState, ParseGlb(data)); }
@@ -74,28 +74,28 @@ public sealed class Lux3DApiClient
     private static Uri ParseGlb(JsonElement task)
     {
         if (!task.TryGetProperty("outputs", out var outputs) || outputs.ValueKind != JsonValueKind.Array)
-            throw new ProviderException("output_invalid", "生成已成功，但结果缺少可识别的 GLB。请勿重新生成。");
+            throw new ProviderException("output_invalid", global::Lux3D.Core.LocalText.Get("Generation succeeded, but no recognizable GLB was returned. Do not regenerate."));
         var glbs = new List<Uri>();
         foreach (var item in outputs.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("content", out var content)) continue;
-            if (content.ValueKind != JsonValueKind.String) throw new ProviderException("output_invalid", "GLB 输出内容格式不符合契约。");
+            if (content.ValueKind != JsonValueKind.String) throw new ProviderException("output_invalid", global::Lux3D.Core.LocalText.Get("GLB output content does not match the contract."));
             string? value = content.GetString();
             if (string.IsNullOrWhiteSpace(value) || value.Equals("NOT_REQUESTED", StringComparison.OrdinalIgnoreCase) || value.Equals("null", StringComparison.OrdinalIgnoreCase)) continue;
             var uri = ProviderValidation.HttpsUri(value);
             if (uri.AbsolutePath.EndsWith(".glb", StringComparison.OrdinalIgnoreCase)) glbs.Add(uri);
         }
-        if (glbs.Count != 1) throw new ProviderException("output_invalid", "生成已成功，但未得到唯一可识别的 GLB。请保留任务并核对输出。");
+        if (glbs.Count != 1) throw new ProviderException("output_invalid", global::Lux3D.Core.LocalText.Get("Generation succeeded, but no unique recognizable GLB was returned. Keep the task and inspect its output."));
         return glbs[0];
     }
 
     public async Task<Uri> UploadImageAsync(string path, CancellationToken cancellationToken = default)
     {
         string extension = Path.GetExtension(path).ToLowerInvariant();
-        if (extension is not (".png" or ".jpg" or ".jpeg" or ".webp")) throw new ArgumentException("图片必须是 PNG、JPEG 或 WebP。", nameof(path));
+        if (extension is not (".png" or ".jpg" or ".jpeg" or ".webp")) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("The image must be PNG, JPEG or WebP."), nameof(path));
         // One snapshot is hashed and uploaded, preventing source-file changes between the two operations.
         var info = new FileInfo(path);
-        if (!info.Exists || info.Length is <= 0 or > 20 * 1024 * 1024) throw new ArgumentException("图片必须介于 1 字节与 20 MiB 之间。", nameof(path));
+        if (!info.Exists || info.Length is <= 0 or > 20 * 1024 * 1024) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("Image size must be between 1 byte and 20 MiB."), nameof(path));
         byte[] bytes;
         await using (var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, FileOptions.Asynchronous))
         using (var snapshot = new MemoryStream())
@@ -103,20 +103,20 @@ public sealed class Lux3DApiClient
             byte[] chunk = new byte[8192]; int count;
             while ((count = await source.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
             {
-                if (snapshot.Length + count > 20 * 1024 * 1024) throw new ArgumentException("图片大小超出限制。", nameof(path));
+                if (snapshot.Length + count > 20 * 1024 * 1024) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("The image exceeds the size limit."), nameof(path));
                 snapshot.Write(chunk, 0, count);
             }
             bytes = snapshot.ToArray();
         }
-        if (bytes.Length == 0) throw new ArgumentException("图片不能为空。", nameof(path));
+        if (bytes.Length == 0) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("The image cannot be empty."), nameof(path));
         string md5 = Convert.ToHexString(MD5.HashData(bytes)).ToLowerInvariant();
         using var tokenRequest = Gateway(HttpMethod.Get, "asset/v1/token");
         var token = await SendAsync(tokenRequest, cancellationToken).ConfigureAwait(false);
         string ousToken = RequiredString(token, "ousToken");
         Uri host = ProviderValidation.HttpsUri(RequiredString(token, "globalDomain"));
-        if (host.AbsolutePath != "/" || !string.IsNullOrEmpty(host.Query) || !string.IsNullOrEmpty(host.Fragment)) throw new ProviderException("invalid_upload", "上传域格式无效。");
+        if (host.AbsolutePath != "/" || !string.IsNullOrEmpty(host.Query) || !string.IsNullOrEmpty(host.Fragment)) throw new ProviderException("invalid_upload", global::Lux3D.Core.LocalText.Get("Invalid upload domain."));
         if (!token.TryGetProperty("blockSize", out var block) || !long.TryParse(Scalar(block), out long size) || size <= 0)
-            throw new ProviderException("invalid_upload", "上传分片大小无效。");
+            throw new ProviderException("invalid_upload", global::Lux3D.Core.LocalText.Get("Invalid upload chunk size."));
         if (bytes.LongLength <= size)
         {
             using var form = new MultipartFormDataContent();
@@ -146,12 +146,12 @@ public sealed class Lux3DApiClient
         for (int attempt = 0; attempt < 120; attempt++)
         {
             var result = await SendOusAsync(host, ousToken, "upload/status", null, cancellationToken).ConfigureAwait(false);
-            if (!result.TryGetProperty("status", out var status) || !status.TryGetInt32(out int value)) throw new ProviderException("invalid_upload", "上传状态格式无效。");
+            if (!result.TryGetProperty("status", out var status) || !status.TryGetInt32(out int value)) throw new ProviderException("invalid_upload", global::Lux3D.Core.LocalText.Get("Invalid upload status format."));
             if (value == 5) return ProviderValidation.HttpsUri(RequiredString(result, "url"));
-            if (value is 6 or 8) throw new ProviderException("upload_failed", "图片上传失败。");
+            if (value is 6 or 8) throw new ProviderException("upload_failed", global::Lux3D.Core.LocalText.Get("Image upload failed."));
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
         }
-        throw new ProviderException("upload_timeout", "图片上传未在限时内完成。");
+        throw new ProviderException("upload_timeout", global::Lux3D.Core.LocalText.Get("Image upload did not finish before the timeout."));
     }
     private async Task<JsonElement> SendOusAsync(Uri host, string token, string path, HttpContent? content, CancellationToken ct)
     {
@@ -172,7 +172,7 @@ public sealed class Lux3DApiClient
             if (!response.IsSuccessStatusCode)
             {
                 string code = response.StatusCode == HttpStatusCode.Unauthorized ? "unauthenticated" : response.StatusCode == HttpStatusCode.TooManyRequests ? "rate_limited" : "http_error";
-                throw new ProviderException(code, code == "unauthenticated" ? "所选区域的 API Key 无效或已失效。" : $"服务请求失败 (HTTP {(int)response.StatusCode})。", isCreate && (int)response.StatusCode >= 500);
+                throw new ProviderException(code, code == "unauthenticated" ? global::Lux3D.Core.LocalText.Get("The API key for the selected region is invalid or expired.") : global::Lux3D.Core.LocalText.Format("Service request failed (HTTP {0}).", (int)response.StatusCode), isCreate && (int)response.StatusCode >= 500);
             }
             if (response.Content.Headers.ContentLength > JsonLimit) throw new JsonException();
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
@@ -183,16 +183,16 @@ public sealed class Lux3DApiClient
             using var document = JsonDocument.Parse(buffer.ToArray());
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("c", out var codeElement) || !root.TryGetProperty("d", out var data)) throw new JsonException();
-            if (Scalar(codeElement) != "0") throw new ProviderException("business_rejected", "服务拒绝了请求，请在官方平台核对账户权限、余额与参数。");
+            if (Scalar(codeElement) != "0") throw new ProviderException("business_rejected", global::Lux3D.Core.LocalText.Get("The service rejected the request. Check account permissions, balance and parameters on the official platform."));
             return data.Clone();
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or OperationCanceledException)
         {
-            if (isCreate) throw new ProviderException("submission_unknown", "生成请求的结果不明确。请核对任务历史，勿重复提交。", true);
+            if (isCreate) throw new ProviderException("submission_unknown", global::Lux3D.Core.LocalText.Get("The generation request has an unknown result. Check task history; do not resubmit."), true);
             if (ex is OperationCanceledException) throw;
-            throw new ProviderException("request_failed", "服务请求失败或响应格式无效。");
+            throw new ProviderException("request_failed", global::Lux3D.Core.LocalText.Get("Service request failed or returned an invalid response."));
         }
     }
-    private static string RequiredString(JsonElement value, string property) => value.TryGetProperty(property, out var field) && field.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(field.GetString()) ? field.GetString()! : throw new ProviderException("invalid_response", "服务响应缺少必需字段。");
+    private static string RequiredString(JsonElement value, string property) => value.TryGetProperty(property, out var field) && field.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(field.GetString()) ? field.GetString()! : throw new ProviderException("invalid_response", global::Lux3D.Core.LocalText.Get("The service response is missing a required field."));
     private static string? Scalar(JsonElement value) => value.ValueKind switch { JsonValueKind.String => value.GetString(), JsonValueKind.Number => value.GetRawText(), _ => null };
 }

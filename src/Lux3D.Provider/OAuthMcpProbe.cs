@@ -24,7 +24,7 @@ public sealed class OAuthMcpProbe
         {
             if (token.ExpiresAt <= DateTimeOffset.UtcNow || !string.Equals(token.TokenType, "Bearer", StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(token.AccessToken) || token.AccessToken.Length > 32768 || token.AccessToken.Any(c => c < 0x21 || c > 0x7e))
-                throw Error("OAuth 会话无效或已过期，请重新登录。");
+                throw Error(global::Lux3D.Core.LocalText.Get("The OAuth session is invalid or expired. Sign in again."));
             Uri endpoint = new(token.Region == LuxRegion.China ? "https://api.aholo3d.cn/lux3d-mcp/mcp" : "https://api.aholo.ai/lux3d-mcp/mcp");
             string? session = null;
             using (var initRequest = Request(endpoint, token, null, null, new
@@ -38,17 +38,17 @@ public sealed class OAuthMcpProbe
                 if (response.Headers.TryGetValues("Mcp-Session-Id", out var values))
                 {
                     var sessions = values.ToArray();
-                    if (sessions.Length != 1 || sessions[0].Length is < 1 or > 2048 || sessions[0].Any(c => c < 0x21 || c > 0x7e)) throw Error("MCP 会话标识无效。");
+                    if (sessions.Length != 1 || sessions[0].Length is < 1 or > 2048 || sessions[0].Any(c => c < 0x21 || c > 0x7e)) throw Error(global::Lux3D.Core.LocalText.Get("Invalid MCP session identifier."));
                     session = sessions[0];
                 }
                 var initialized = await ReadResultAsync(response, 1, timeout.Token).ConfigureAwait(false);
                 protocol = String(initialized, "protocolVersion");
-                if (!SupportedVersions.Contains(protocol, StringComparer.Ordinal)) throw Error("MCP 协议版本尚不受支持。");
-                if (!initialized.TryGetProperty("capabilities", out var capabilities) || !capabilities.TryGetProperty("tools", out _)) throw Error("MCP 服务未公布工具发现能力。");
+                if (!SupportedVersions.Contains(protocol, StringComparer.Ordinal)) throw Error(global::Lux3D.Core.LocalText.Get("Unsupported MCP protocol version."));
+                if (!initialized.TryGetProperty("capabilities", out var capabilities) || !capabilities.TryGetProperty("tools", out _)) throw Error(global::Lux3D.Core.LocalText.Get("The MCP service did not advertise tool discovery."));
             }
             using (var ready = Request(endpoint, token, protocol, session, new { jsonrpc = "2.0", method = "notifications/initialized" }))
             using (var response = await _http.SendAsync(ready, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false))
-            { EnsureStatus(response); if (response.StatusCode != HttpStatusCode.Accepted) throw Error("MCP 初始化通知未被正确确认。"); }
+            { EnsureStatus(response); if (response.StatusCode != HttpStatusCode.Accepted) throw Error(global::Lux3D.Core.LocalText.Get("The MCP initialization notification was not acknowledged correctly.")); }
             var names = new HashSet<string>(StringComparer.Ordinal);
             var cursors = new HashSet<string>(StringComparer.Ordinal);
             string? cursor = null;
@@ -60,23 +60,23 @@ public sealed class OAuthMcpProbe
                 using var response = await _http.SendAsync(list, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
                 EnsureStatus(response);
                 var result = await ReadResultAsync(response, id, timeout.Token).ConfigureAwait(false);
-                if (!result.TryGetProperty("tools", out var tools) || tools.ValueKind != JsonValueKind.Array) throw Error("MCP 工具清单格式无效。");
+                if (!result.TryGetProperty("tools", out var tools) || tools.ValueKind != JsonValueKind.Array) throw Error(global::Lux3D.Core.LocalText.Get("Invalid MCP tool list format."));
                 foreach (var tool in tools.EnumerateArray())
                 {
                     string name = String(tool, "name");
-                    if (string.IsNullOrWhiteSpace(name) || name.Length > 128 || name.Any(char.IsControl) || !names.Add(name) || names.Count > 1000) throw Error("MCP 工具清单超出限制或含重复名称。");
+                    if (string.IsNullOrWhiteSpace(name) || name.Length > 128 || name.Any(char.IsControl) || !names.Add(name) || names.Count > 1000) throw Error(global::Lux3D.Core.LocalText.Get("The MCP tool list exceeds limits or contains duplicate names."));
                 }
                 cursor = String(result, "nextCursor");
-                if (cursor.Length == 0) return new(true, names.Order(StringComparer.Ordinal).ToArray(), protocol, "OAuth 可访问 MCP 工具清单；尚未验证生成权限或额度。");
-                if (cursor.Length > 4096 || cursor.Any(char.IsControl) || !cursors.Add(cursor)) throw Error("MCP 分页游标无效。");
+                if (cursor.Length == 0) return new(true, names.Order(StringComparer.Ordinal).ToArray(), protocol, global::Lux3D.Core.LocalText.Get("OAuth can access the MCP tool list; generation permissions and credits have not been verified."));
+                if (cursor.Length > 4096 || cursor.Any(char.IsControl) || !cursors.Add(cursor)) throw Error(global::Lux3D.Core.LocalText.Get("Invalid MCP pagination cursor."));
             }
-            throw Error("MCP 工具清单超过分页限制。");
+            throw Error(global::Lux3D.Core.LocalText.Get("The MCP tool list exceeds the pagination limit."));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        { return new(false, [], protocol, "OAuth MCP 探测超时；未调用生成工具。"); }
+        { return new(false, [], protocol, global::Lux3D.Core.LocalText.Get("The OAuth MCP probe timed out; no generation tool was called.")); }
         catch (ProviderException ex) { return new(false, [], protocol, ex.Message); }
         catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidOperationException or DecoderFallbackException)
-        { return new(false, [], protocol, "OAuth MCP 连接或响应格式无效；未调用生成工具。"); }
+        { return new(false, [], protocol, global::Lux3D.Core.LocalText.Get("The OAuth MCP connection or response format is invalid; no generation tool was called.")); }
     }
     private static HttpRequestMessage Request(Uri endpoint, OAuthToken token, string? protocol, string? session, object body)
     {
@@ -92,28 +92,28 @@ public sealed class OAuthMcpProbe
     {
         if (response.IsSuccessStatusCode) return;
         throw Error(response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
-            ? "OAuth 已取得 token，但 MCP 未授予访问权限。"
-            : $"MCP 探测失败 (HTTP {(int)response.StatusCode})；未调用生成工具。");
+            ? global::Lux3D.Core.LocalText.Get("OAuth returned a token, but MCP access was not granted.")
+            : global::Lux3D.Core.LocalText.Format("MCP probe failed (HTTP {0}); no generation tool was called.", (int)response.StatusCode));
     }
     private static async Task<JsonElement> ReadResultAsync(HttpResponseMessage response, int expectedId, CancellationToken ct)
     {
-        if (response.Content.Headers.ContentLength > MaximumResponseBytes) throw Error("MCP 响应超过大小限制。");
+        if (response.Content.Headers.ContentLength > MaximumResponseBytes) throw Error(global::Lux3D.Core.LocalText.Get("The MCP response exceeds the size limit."));
         string? mediaType = response.Content.Headers.ContentType?.MediaType;
         await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         if (mediaType == "application/json")
         {
             using var buffer = new MemoryStream(); byte[] chunk = new byte[8192]; int n;
             while ((n = await stream.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
-            { if (buffer.Length + n > MaximumResponseBytes) throw Error("MCP 响应超过大小限制。"); buffer.Write(chunk, 0, n); }
-            return ParseResult(new UTF8Encoding(false, true).GetString(buffer.ToArray()), expectedId) ?? throw Error("MCP 响应编号不匹配。");
+            { if (buffer.Length + n > MaximumResponseBytes) throw Error(global::Lux3D.Core.LocalText.Get("The MCP response exceeds the size limit.")); buffer.Write(chunk, 0, n); }
+            return ParseResult(new UTF8Encoding(false, true).GetString(buffer.ToArray()), expectedId) ?? throw Error(global::Lux3D.Core.LocalText.Get("The MCP response ID does not match."));
         }
-        if (mediaType != "text/event-stream") throw Error("MCP 返回了不支持的内容类型。");
+        if (mediaType != "text/event-stream") throw Error(global::Lux3D.Core.LocalText.Get("MCP returned an unsupported content type."));
         byte[] bytes = new byte[4096]; char[] chars = new char[8192];
         var decoder = new UTF8Encoding(false, true).GetDecoder();
         var pending = new StringBuilder(); var eventData = new StringBuilder(); int total = 0, read;
         while ((read = await stream.ReadAsync(bytes, ct).ConfigureAwait(false)) > 0)
         {
-            total += read; if (total > MaximumResponseBytes) throw Error("MCP SSE 响应超过大小限制。");
+            total += read; if (total > MaximumResponseBytes) throw Error(global::Lux3D.Core.LocalText.Get("The MCP SSE response exceeds the size limit."));
             int count = decoder.GetChars(bytes, 0, read, chars, 0, false); pending.Append(chars, 0, count);
             while (true)
             {
@@ -134,16 +134,16 @@ public sealed class OAuthMcpProbe
                 }
             }
         }
-        throw Error("MCP SSE 连接结束前未返回对应结果。");
+        throw Error(global::Lux3D.Core.LocalText.Get("The MCP SSE connection ended without returning the expected result."));
     }
     private static JsonElement? ParseResult(string json, int expectedId)
     {
         using var document = JsonDocument.Parse(json); var message = document.RootElement;
-        if (message.ValueKind != JsonValueKind.Object || String(message, "jsonrpc") != "2.0") throw Error("MCP 响应不是有效 JSON-RPC。");
+        if (message.ValueKind != JsonValueKind.Object || String(message, "jsonrpc") != "2.0") throw Error(global::Lux3D.Core.LocalText.Get("The MCP response is not valid JSON-RPC."));
         if (!message.TryGetProperty("id", out var id)) return null; // Notifications carry no result.
         if (id.ValueKind != JsonValueKind.Number || !id.TryGetInt32(out int number) || number != expectedId) return null;
-        if (message.TryGetProperty("error", out _)) throw Error("MCP 服务拒绝了工具发现请求。");
-        if (!message.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Object) throw Error("MCP 结果格式无效。");
+        if (message.TryGetProperty("error", out _)) throw Error(global::Lux3D.Core.LocalText.Get("The MCP service rejected tool discovery."));
+        if (!message.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Object) throw Error(global::Lux3D.Core.LocalText.Get("Invalid MCP result format."));
         return result.Clone();
     }
     private static int IndexOfNewline(StringBuilder text) { for (int n = 0; n < text.Length; n++) if (text[n] == '\n') return n; return -1; }

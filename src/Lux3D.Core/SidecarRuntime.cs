@@ -8,7 +8,7 @@ internal static class SidecarRuntime
     public static string FindDotNet8()
     {
         if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
-            throw new PlatformNotSupportedException("Lux3D 插件支持 macOS 和 Windows 上的 Rhino 8。");
+            throw new PlatformNotSupportedException(global::Lux3D.Core.LocalText.Get("Lux3D supports Rhino 8 on macOS and Windows."));
 
         string hostName = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -34,7 +34,7 @@ internal static class SidecarRuntime
                 // An inaccessible or stale candidate must not hide a later valid installation.
             }
         }
-        throw new IOException("未找到可用的 .NET 8 Runtime。请安装本机架构的 .NET 8 Runtime，或设置 DOTNET_ROOT 后重新启动 Rhino。");
+        throw new IOException(global::Lux3D.Core.LocalText.Get("No usable .NET 8 Runtime was found. Install the runtime for this architecture, or set DOTNET_ROOT and restart Rhino."));
     }
 
     private static IEnumerable<string> CandidateRoots()

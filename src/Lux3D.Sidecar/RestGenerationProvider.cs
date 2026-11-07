@@ -39,12 +39,12 @@ internal sealed class RestGenerationProvider : IGenerationProvider
     {
         for (int redirects = 0; redirects <= 3; redirects++)
         {
-            if (uri.Scheme != "https" || uri.IsLoopback || uri.Port != 443 || !string.IsNullOrEmpty(uri.UserInfo)) throw new IOException("资产地址不支持。");
+            if (uri.Scheme != "https" || uri.IsLoopback || uri.Port != 443 || !string.IsNullOrEmpty(uri.UserInfo)) throw new IOException(global::Lux3D.Core.LocalText.Get("Unsupported asset URL."));
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             using var response = await _download.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             if ((int)response.StatusCode is 301 or 302 or 303 or 307 or 308)
             {
-                if (response.Headers.Location is null) throw new IOException("下载重定向无效。");
+                if (response.Headers.Location is null) throw new IOException(global::Lux3D.Core.LocalText.Get("Invalid download redirect."));
                 uri = new Uri(uri, response.Headers.Location); continue;
             }
             response.EnsureSuccessStatusCode();
@@ -57,6 +57,6 @@ internal sealed class RestGenerationProvider : IGenerationProvider
             }
             return output.ToArray();
         }
-        throw new IOException("资产下载重定向次数过多。");
+        throw new IOException(global::Lux3D.Core.LocalText.Get("Too many asset download redirects."));
     }
 }
