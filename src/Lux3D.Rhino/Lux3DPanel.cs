@@ -58,6 +58,7 @@ public sealed class Lux3DPanel : Panel, IPanel
     private readonly Button _nextPage;
     private readonly Dictionary<Guid, TaskPlacementTarget> _autoPlacements = new();
     private readonly Dictionary<Guid, TaskFeedback> _taskFeedback = new();
+    private readonly Dictionary<Guid, DateTimeOffset> _nextQueries = new();
     private TaskRecord? _recentTask;
     private Guid? _placingOperationId;
     private string _operationPhase = "";
@@ -130,15 +131,17 @@ public sealed class Lux3DPanel : Panel, IPanel
         _timer.Elapsed += (_, _) =>
         {
             if (!_shown || _paused || _busy || _disposed) return;
-            if (_autoPlacements.Count > 0)
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            Guid[] due = _autoPlacements.Keys.Where(id => !_nextQueries.TryGetValue(id, out DateTimeOffset next) || next <= now).ToArray();
+            if (due.Length > 0)
             {
-                _autoPollIndex %= _autoPlacements.Count;
-                Guid operationId = _autoPlacements.Keys.ElementAt(_autoPollIndex++);
+                _autoPollIndex %= due.Length;
+                Guid operationId = due[_autoPollIndex++];
                 _ = RunAsync(() => RefreshAutoTaskAsync(operationId), global::Lux3D.Core.LocalText.Get("Automatically query original task"), background: true);
                 return;
             }
             TaskRecord? record = SelectedTask();
-            if (record is not null && record.State is "Queued" or "Running" or "StatusUnknown" or "Succeeded" or "DownloadFailed")
+            if (record is not null && QueryDue(record) && record.State is "Queued" or "Running" or "StatusUnknown" or "Succeeded" or "DownloadFailed")
                 _ = RunAsync(RefreshSelectedAsync, global::Lux3D.Core.LocalText.Get("Automatically query original task"), background: true);
         };
         _tabs.Pages.Add(new TabPage { Text = global::Lux3D.Core.LocalText.Get("Generate"), Content = Layout(
@@ -289,8 +292,11 @@ public sealed class Lux3DPanel : Panel, IPanel
         if (SelectedTask()?.OperationId == task.OperationId) RenderTask();
         RenderRecentTask();
     }
+    private static bool QueryDue(TaskRecord task) => task.NextQueryAt is null || task.NextQueryAt <= DateTimeOffset.UtcNow;
     private void ObserveTask(TaskRecord task, bool makeRecent = false)
     {
+        if (task.NextQueryAt is { } next) _nextQueries[task.OperationId] = next;
+        else _nextQueries.Remove(task.OperationId);
         if (makeRecent || _recentTask?.OperationId == task.OperationId)
         {
             _recentTask = task;
@@ -450,7 +456,7 @@ public sealed class Lux3DPanel : Panel, IPanel
         try
         {
             TaskRecord task = await _client.GetTaskAsync(operationId);
-            if (!TaskPlacementPolicy.HasCachedAsset(task) && TaskPlacementPolicy.CanRefresh(task))
+            if (QueryDue(task) && !TaskPlacementPolicy.HasCachedAsset(task) && TaskPlacementPolicy.CanRefresh(task))
                 task = await _client.RefreshAsync(operationId);
             Guid? selected = null;
             Ui(() => { selected = SelectedTask()?.OperationId; ClearRecoveredQueryError(task); ObserveTask(task); });
@@ -522,6 +528,10 @@ public sealed class Lux3DPanel : Panel, IPanel
         if (r is null) { _details.Text = global::Lux3D.Core.LocalText.Get("Select a task to view its result."); return; }
         string feedback = _taskFeedback.TryGetValue(r.OperationId, out var value) ? global::Lux3D.Core.LocalText.Get("\nSession result: ") + value.Message : "";
         _details.Text = global::Lux3D.Core.LocalText.Format("{0} · {1} · {2:N0} faces\n{3}{4}\n{5}\nTask ID: {6}", StateText(r.State), (r.Region == "cn" ? global::Lux3D.Core.LocalText.Get("China") : global::Lux3D.Core.LocalText.Get("Global")), r.FaceCount, r.Prompt, feedback, r.Error, r.OperationId);
+        if (r.RawStatus is { } rawStatus)
+            _details.Text += "\n" + global::Lux3D.Core.LocalText.Format("Provider status: {0}", rawStatus);
+        if (r.NextQueryAt is { } next)
+            _details.Text += "\n" + global::Lux3D.Core.LocalText.Format("Next query: {0}", next.LocalDateTime.ToString("G", CultureInfo.CurrentCulture));
     }
     private static string StateText(string state) => state switch
     {
@@ -545,7 +555,15 @@ public sealed class Lux3DPanel : Panel, IPanel
     private void AddCandidate(string path, string? sha, string name)
     {
         if (_candidates.Count >= 3) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Up to 3 candidates per group. Remove an unwanted candidate first."));
+        int epoch = _placementEpoch;
         PreparedAsset asset = _host.Prepare(path, sha, TargetDocument());
+        // The native importer may pump panel-close events during preflight.
+        // Do not resurrect candidates or leak their headless document afterward.
+        if (_disposed || epoch != _placementEpoch)
+        {
+            asset.Dispose();
+            return;
+        }
         _candidates.Add((name, asset, Guid.NewGuid()));
         SelectCandidate(_candidates.Count - 1);
         ShowFeedback(global::Lux3D.Core.LocalText.Get("Candidate loaded. Change height, angle or position under Generate to update the preview. It is added to the document only when accepted."));

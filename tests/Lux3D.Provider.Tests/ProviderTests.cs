@@ -44,6 +44,35 @@ public sealed class ProviderTests
         Assert.True(error.SubmissionMayHaveSucceeded); Assert.Equal(1, handler.Count);
         Assert.DoesNotContain("raw request", error.Message);
     }
+    [Theory]
+    [InlineData("null")]
+    [InlineData("true")]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    [InlineData("\"\"")]
+    public async Task MalformedCreateReceiptIsUnknownAndNeverRetried(string code)
+    {
+        var handler = new Stub(_ => Task.FromResult(Json("{\"c\":" + code + ",\"d\":42}")));
+        var api = new Lux3DApiClient(new HttpClient(handler), new(LuxRegion.China, "fake"));
+        var error = await Assert.ThrowsAsync<ProviderException>(() => api.CreateTextAsync("chair"));
+        Assert.True(error.SubmissionMayHaveSucceeded);
+        Assert.Equal("submission_unknown", error.Code);
+        Assert.Equal(1, handler.Count);
+    }
+
+    [Theory]
+    [InlineData("null", "3")]
+    [InlineData("42", "3")]
+    [InlineData("\"LUX_3D\"", "\"3\"")]
+    [InlineData("\"LUX_3D\"", "null")]
+    public async Task MalformedTaskFieldsReturnControlledError(string biz, string status)
+    {
+        var handler = new Stub(_ => Task.FromResult(Json("{\"c\":0,\"d\":{\"taskId\":42,\"bizId\":" + biz + ",\"status\":" + status + "}}")));
+        var api = new Lux3DApiClient(new HttpClient(handler), new(LuxRegion.China, "fake"));
+        var error = await Assert.ThrowsAsync<ProviderException>(() => api.GetTaskAsync("42"));
+        Assert.Equal("invalid_task", error.Code);
+    }
+
     [Fact]
     public async Task RejectsMismatchedTaskIdentity()
     {
@@ -109,6 +138,28 @@ public sealed class ProviderTests
         }
         finally { File.Delete(path); }
     }
+    [Theory]
+    [InlineData("null", 100)]
+    [InlineData("[]", 100)]
+    [InlineData("null", 2)]
+    [InlineData("[]", 2)]
+    public async Task MalformedUploadPayloadReturnsControlledError(string payload, int blockSize)
+    {
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".png");
+        await File.WriteAllBytesAsync(path, new byte[] { 1, 2, 3, 4, 5 });
+        try
+        {
+            var handler = new Stub(request => Task.FromResult(Json(request.RequestUri!.Host == "api.aholo.ai"
+                ? JsonSerializer.Serialize(new { c = 0, d = new { ousToken = "fake", globalDomain = "https://ous.example", blockSize } })
+                : "{\"c\":0,\"d\":" + payload + "}")));
+            var api = new Lux3DApiClient(new HttpClient(handler), new(LuxRegion.International, "fake"));
+            var error = await Assert.ThrowsAsync<ProviderException>(() => api.UploadImageAsync(path));
+            Assert.Equal("invalid_upload", error.Code);
+            Assert.False(error.SubmissionMayHaveSucceeded);
+        }
+        finally { File.Delete(path); }
+    }
+
     [Fact]
     public void CredentialsNeverPrintSecretsAndAreRegionBound()
     {

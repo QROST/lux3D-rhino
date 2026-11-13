@@ -49,5 +49,88 @@ public sealed class TaskStoreTests : IDisposable
         await Assert.ThrowsAsync<IOException>(() => BoundedLine.ReadAsync(new StringReader("abc"), default));
         Assert.Equal("abc", await BoundedLine.ReadAsync(new StringReader("abc\n"), default));
     }
+    [Theory]
+    [InlineData("malformed")]
+    [InlineData("oversized")]
+    [InlineData("mismatched-id")]
+    [InlineData("null-region")]
+    public async Task UnreadableRecordPreservesOtherHistoryAndBlocksUnsafeGeneration(string damage)
+    {
+        var store = new TaskStore(_root);
+        var good = Record();
+        store.Save(good);
+        Guid badId = Guid.NewGuid();
+        string badPath = Path.Combine(_root, "tasks", badId.ToString("N") + ".json");
+        string original = damage switch
+        {
+            "malformed" => "{ broken secret-detail",
+            "oversized" => new string('x', 128 * 1024 + 1),
+            "mismatched-id" => JsonSerializer.Serialize(Record(), LuxJson.Options),
+            _ => JsonSerializer.Serialize(Record() with { OperationId = badId, Region = null! }, LuxJson.Options)
+        };
+        File.WriteAllText(badPath, original);
+        var records = store.List();
+        Assert.Equal(2, records.Length);
+        Assert.Contains(good, records);
+        var placeholder = records.Single(t => t.OperationId == badId);
+        Assert.Equal("SubmissionUnknown", placeholder.State);
+        Assert.Contains("original file is preserved", placeholder.Error);
+        Assert.Null(placeholder.TaskId);
+        Assert.True(store.HasUnknownSubmissions());
+        var error = Assert.Throws<IOException>(() => store.Get(badId));
+        Assert.DoesNotContain("secret-detail", error.Message);
+        Assert.Throws<ArgumentException>(() => store.Save(placeholder));
+        var provider = new NoNetworkProvider();
+        var workflow = new Workflow(store);
+        await Assert.ThrowsAsync<IOException>(() => workflow.RefreshAsync(provider, badId));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.GenerateAsync(provider, new("chair")));
+        Assert.Equal(0, provider.Calls);
+        Assert.Equal(original, File.ReadAllText(badPath));
+        Assert.Equal(good, store.Get(good.OperationId));
+
+        var confirmed = await workflow.GenerateAsync(provider, new("chair", AcknowledgeUnknownSubmission: true));
+        Assert.Equal("Queued", confirmed.State);
+        Assert.Equal(1, provider.Calls);
+        Assert.True(store.HasUnknownSubmissions());
+        Assert.Equal(original, File.ReadAllText(badPath));
+    }
+    [Theory]
+    [InlineData("unexpected.json")]
+    [InlineData("00000000000000000000000000000000.json")]
+    [InlineData("AABBCCDDEEFF00112233445566778899.json")]
+    [InlineData("aabbccddeeff00112233445566778899.JSON")]
+    public async Task NoncanonicalRecordNameCannotHideHistoryOrBypassUnknownGuard(string name)
+    {
+        var store = new TaskStore(_root);
+        var good = Record();
+        store.Save(good);
+        string path = Path.Combine(_root, "tasks", name);
+        const string original = "{ original damaged bytes";
+        File.WriteAllText(path, original);
+        Assert.Equal(good, Assert.Single(store.List()));
+        Assert.True(store.HasUnknownSubmissions());
+        var provider = new NoNetworkProvider();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new Workflow(store).GenerateAsync(provider, new("chair")));
+        Assert.Equal(0, provider.Calls);
+        Assert.Equal(original, File.ReadAllText(path));
+    }
+    [Fact] public void InterruptedAtomicWriteTemporaryFileDoesNotBlockGeneration()
+    {
+        var store = new TaskStore(_root);
+        File.WriteAllText(Path.Combine(_root, "tasks", Guid.NewGuid().ToString("N") + ".json.partial.tmp"), "partial");
+        Assert.Empty(store.List());
+        Assert.False(store.HasUnknownSubmissions());
+    }
+    private static TaskRecord Record() => new(Guid.NewGuid(), "global", "chair", null, "G1-Turbo", 50000,
+        "Queued", "42", null, null, null, DateTimeOffset.UtcNow, "test-connection");
+    private sealed class NoNetworkProvider : IGenerationProvider
+    {
+        public string Region => "global";
+        public string ConnectionId => "test-connection";
+        public int Calls;
+        public Task<string> CreateAsync(GenerationInput input, CancellationToken cancellationToken) { Calls++; return Task.FromResult("43"); }
+        public Task<RemoteTask> QueryAsync(string taskId, CancellationToken cancellationToken) { Calls++; throw new InvalidOperationException("Unexpected query"); }
+        public Task<byte[]> DownloadAsync(Uri uri, CancellationToken cancellationToken) { Calls++; throw new InvalidOperationException("Unexpected download"); }
+    }
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

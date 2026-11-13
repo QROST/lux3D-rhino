@@ -7,7 +7,8 @@ public sealed record GenerationInput(string Prompt, string? ImagePath = null, st
 public sealed record TaskRecord(Guid OperationId, string Region, string Prompt, string? ImagePath, string Model, int FaceCount,
     string State, string? TaskId, string? AssetPath, string? AssetSha256, string? Error, DateTimeOffset CreatedAt,
     string ConnectionId = "", bool EnablePbr = true, string? InputSha256 = null,
-    string? ValidationCode = null, string? RejectedAssetPath = null, string? RejectedAssetSha256 = null);
+    string? ValidationCode = null, string? RejectedAssetPath = null, string? RejectedAssetSha256 = null,
+    int? RawStatus = null, DateTimeOffset? NextQueryAt = null, int QueryFailures = 0);
 public sealed record RpcRequest(int Version, Guid Id, string Method, JsonElement Payload);
 public sealed record RpcResponse(int Version, Guid Id, JsonElement? Result, string? Error);
 public static class LuxJson

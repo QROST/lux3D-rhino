@@ -103,6 +103,58 @@ public sealed class WorkflowTests : IDisposable
         Assert.Equal("Failed", (await new Workflow(store).GenerateAsync(_provider, new("chair"))).State);
         Assert.False(store.HasUnknownSubmissions());
     }
+    [Fact] public async Task QueryingRejectedSubmissionPreservesConclusiveFailure()
+    {
+        _provider.Reject = true;
+        var store = new TaskStore(_root);
+        var workflow = new Workflow(store);
+        var rejected = await workflow.GenerateAsync(_provider, new("chair"));
+        var refreshed = await workflow.RefreshAsync(_provider, rejected.OperationId);
+        Assert.Equal(rejected, refreshed);
+        Assert.Equal("Failed", store.Get(rejected.OperationId).State);
+        Assert.False(store.HasUnknownSubmissions());
+        Assert.Equal(0, _provider.Queries);
+    }
+    [Fact] public async Task MissingReceiptRecoveryIsPersistedAndStillBlocksDuplicateSubmission()
+    {
+        var store = new TaskStore(_root);
+        var workflow = new Workflow(store);
+        var created = await workflow.GenerateAsync(_provider, new("chair"));
+        store.Save(created with { TaskId = "" });
+        var refreshed = await workflow.RefreshAsync(_provider, created.OperationId);
+        Assert.Equal("SubmissionUnknown", refreshed.State);
+        Assert.Equal(refreshed, store.Get(created.OperationId));
+        Assert.True(store.HasUnknownSubmissions());
+        Assert.Equal(0, _provider.Queries);
+    }
+    [Fact] public async Task PreCancelledGenerationLeavesNoSubmissionAndDoesNotCallProvider()
+    {
+        var store = new TaskStore(_root);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new Workflow(store).GenerateAsync(_provider, new("chair"), cancellation.Token));
+        Assert.Empty(store.List());
+        Assert.False(store.HasUnknownSubmissions());
+        Assert.Equal(0, _provider.Creates);
+    }
+    [Fact] public async Task MismatchedQueryReceiptCannotDownloadOrReplaceOriginalTask()
+    {
+        var store = new TaskStore(_root);
+        var now = DateTimeOffset.UtcNow;
+        var workflow = new Workflow(store, () => now, () => 0);
+        var created = await workflow.GenerateAsync(_provider, new("chair"));
+        _provider.ReturnedTaskId = "different-task";
+        var refreshed = await workflow.RefreshAsync(_provider, created.OperationId);
+        Assert.Equal("StatusUnknown", refreshed.State);
+        Assert.Equal(created.TaskId, refreshed.TaskId);
+        Assert.Null(refreshed.AssetPath);
+        Assert.Equal(0, _provider.Downloads);
+        _provider.ReturnedTaskId = null;
+        now = refreshed.NextQueryAt!.Value;
+        Assert.Equal("Ready", (await workflow.RefreshAsync(_provider, created.OperationId)).State);
+        Assert.Equal(1, _provider.Creates);
+    }
     private sealed class FakeProvider : IGenerationProvider
     {
         public string Region => "global";
@@ -111,10 +163,11 @@ public sealed class WorkflowTests : IDisposable
         public bool LoseResponse, FailDownload, Reject, ResourceFailure;
         public byte[]? Payload;
         public string State = "Succeeded";
+        public string? ReturnedTaskId;
         public Task<string> CreateAsync(GenerationInput input, CancellationToken ct)
         { Creates++; if (Reject) throw new SubmissionRejectedException("credentials rejected"); if (LoseResponse) throw new IOException("response lost"); return Task.FromResult("9223372036854775800"); }
         public Task<RemoteTask> QueryAsync(string taskId, CancellationToken ct)
-        { Queries++; return Task.FromResult(new RemoteTask(taskId, State, 3, new Uri("https://example.com/model.glb"))); }
+        { Queries++; return Task.FromResult(new RemoteTask(ReturnedTaskId ?? taskId, State, 3, new Uri("https://example.com/model.glb"))); }
         public Task<byte[]> DownloadAsync(Uri uri, CancellationToken ct)
         { Downloads++; if (ResourceFailure) throw new OutOfMemoryException(); if (FailDownload) throw new IOException("lost"); return Task.FromResult(Payload ?? GlbContainerValidatorTests.CreateTexturedTriangleGlb()); }
     }

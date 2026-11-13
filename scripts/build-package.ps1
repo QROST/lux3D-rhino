@@ -18,38 +18,26 @@ try {
     $buildArguments = @('build', 'Lux3D.Rhino.sln', '--configuration', 'Release', '-p:UseAppHost=false')
     if ($NoRestore) { $buildArguments += '--no-restore' }
     Invoke-LuxNative $dotnet $buildArguments
+    # Python is required for the shared, allowlisted staging path on both platforms.
+    $python = Get-Command py.exe -ErrorAction SilentlyContinue
+    $pythonPrefix = @('-3')
+    if ($null -eq $python) {
+        $python = Get-Command python.exe -ErrorAction SilentlyContinue
+        $pythonPrefix = @()
+    }
+    if ($null -eq $python) { throw 'Python 3.9+ is required for package staging and validation.' }
     $checks = 'skipped'
     if (-not $SkipTests) {
         Invoke-LuxNative $dotnet @('test', 'Lux3D.Rhino.sln', '--configuration', 'Release', '--no-build', '--no-restore')
-        $python = Get-Command py.exe -ErrorAction SilentlyContinue
-        if ($null -ne $python) { Invoke-LuxNative $python.Source @('-3', 'scripts\create-fixtures.py', '--check') }
-        else {
-            $python = Get-Command python.exe -ErrorAction SilentlyContinue
-            if ($null -eq $python) { throw 'Python 3 is needed for fixture checks. Install Python, or explicitly use -SkipTests for an untested candidate.' }
-            Invoke-LuxNative $python.Source @('scripts\create-fixtures.py', '--check')
-        }
+        Invoke-LuxNative $python.Source ($pythonPrefix + @('scripts\create-fixtures.py', '--check'))
+        Invoke-LuxNative $python.Source ($pythonPrefix + @('-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_*.py'))
         $checks = 'passed'
     }
     $artifacts = Join-Path $script:LuxRepository 'artifacts'
     [void][IO.Directory]::CreateDirectory($artifacts)
     $stage = Join-Path $artifacts ('package-win.' + [Guid]::NewGuid().ToString('N'))
     [void][IO.Directory]::CreateDirectory($stage)
-    Get-ChildItem -LiteralPath 'src\Lux3D.Rhino\bin\Release\net7.0' -Force | Copy-Item -Destination $stage -Recurse
-    $sidecar = Join-Path $stage 'sidecar'
-    [void][IO.Directory]::CreateDirectory($sidecar)
-    Get-ChildItem -LiteralPath 'src\Lux3D.Sidecar\bin\Release\net8.0' -Force | Copy-Item -Destination $sidecar -Recurse
-    # Remove only apphost copies in this newly-created staging directory, never build outputs.
-    foreach ($name in @('Lux3D.Sidecar', 'Lux3D.Sidecar.exe')) {
-        $staleHost = Join-Path $sidecar $name
-        if (Test-Path -LiteralPath $staleHost -PathType Leaf) { Remove-Item -LiteralPath $staleHost }
-    }
-    Copy-Item -LiteralPath 'packaging\manifest.yml' -Destination $stage
-    Copy-Item -LiteralPath @('LICENSE', 'NOTICE', 'readme.md', 'readme.zh-CN.md') -Destination $stage
-    Copy-Item -LiteralPath 'docs' -Destination $stage -Recurse
-    $fixtureStage = Join-Path $stage 'fixtures'
-    [void][IO.Directory]::CreateDirectory($fixtureStage)
-    Get-ChildItem -Path 'fixtures\*.glb' -File | Copy-Item -Destination $fixtureStage
-    Copy-Item -LiteralPath @('fixtures\manifest.json', 'fixtures\README.md') -Destination $fixtureStage
+    Invoke-LuxNative $python.Source ($pythonPrefix + @('scripts\stage-package.py', $stage))
     Push-Location $stage
     try { Invoke-LuxNative $yak @('build', '--platform', 'win') }
     finally { Pop-Location }

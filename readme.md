@@ -2,7 +2,7 @@
 
 English | [简体中文](readme.zh-CN.md)
 
-An independent Rhino integration by **CuriousArc · qrost**, not an official Manycore, Aholo, or McNeel product. Features include Manycore OAuth sign-in, Lux3D text/single-image generation, persistent asset caching, GLB candidate previews, and independent Block placement. The current version is **0.1.4-beta.4**. This Yak distribution targets **macOS / Rhino 8.32+**. Windows implementation and build scripts are present; host acceptance and a public Windows distribution remain pending.
+An independent Rhino integration by **CuriousArc · qrost**, not an official Manycore, Aholo, or McNeel product. Features include Manycore OAuth sign-in, Lux3D text/single-image generation, persistent asset caching, GLB candidate previews, and independent Block placement. The current source candidate is **0.1.4-beta.6**; the latest public Yak release verified on 2026-11-13 is **0.1.4-beta.4**. This Yak distribution targets **macOS / Rhino 8.32+**. Windows implementation and build scripts are present; host acceptance and a public Windows distribution remain pending.
 The interface uses English by default. At plugin load, Rhino’s UI language takes precedence over the system UI language; Chinese locales (including Traditional Chinese locales) use the Simplified Chinese translation. If Rhino cannot report its language, the system UI language is used, with English for other or unknown languages. Restart Rhino after changing its language. This includes the private background process and OAuth callback page; prompts, model names and saved identifiers are not translated. Numeric formatting keeps the user’s regional settings. Known complete diagnostic messages from older task records are localized when read; dynamic legacy diagnostics and unrecognized provider messages retain their original text.
 
 
@@ -11,6 +11,10 @@ The interface uses English by default. At plugin load, Rhino’s UI language tak
 See [verification records](docs/verification.md) for the current status. The user has confirmed OAuth sign-in, API Key generation, and successful placement/display of the Buddha model with version 0.1.3 on macOS. The 0.1.4-beta.4 language selection and layout, UI and preview interactions, full PBR, Undo/Redo, save/reopen behavior, and Windows host acceptance still require focused verification. Success with an earlier version does not establish acceptance of new changes.
 
 ## This preview release
+
+The local beta.6 candidate adds persistent query backoff with jitter and honors the service Retry-After header. Raw provider status and the next query time are retained in history. This only retries queries to the original task; generation is never automatically resubmitted. Native save/reopen checks now reject missing texture evidence; four-channel PBR appearance still needs manual acceptance.
+
+The local beta.5 candidate hardens submission receipts and upload failures, preserves conclusive task failures during recovery, checks task identity before downloading, and protects candidate resources when the panel closes during native import. Package assembly now uses a reviewed file allowlist. These changes have not yet been published or accepted in the Rhino host. See the [delivery checklist](docs/hackathon-delivery.md) for remaining acceptance and demo evidence.
 
 - Public attribution uses **CuriousArc · qrost** throughout the documentation, copyright notice, Yak metadata, and plug-in description.
 - Rhino Plug-in Properties now includes **CuriousArc** as Publisher, the project website, and a description with the maintainer handle. These native fields are separate from Yak authors; beta.1 omitted them. Restart Rhino after upgrading.

@@ -39,8 +39,9 @@ public sealed class ProviderException : Exception
 {
     public string Code { get; }
     public bool SubmissionMayHaveSucceeded { get; }
-    public ProviderException(string code, string message, bool submissionMayHaveSucceeded = false) : base(message)
-    { Code = code; SubmissionMayHaveSucceeded = submissionMayHaveSucceeded; }
+    public DateTimeOffset? RetryAt { get; }
+    public ProviderException(string code, string message, bool submissionMayHaveSucceeded = false, DateTimeOffset? retryAt = null) : base(message)
+    { Code = code; SubmissionMayHaveSucceeded = submissionMayHaveSucceeded; RetryAt = retryAt; }
 }
 
 internal static class ProviderValidation

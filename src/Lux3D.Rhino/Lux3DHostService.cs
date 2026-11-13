@@ -35,6 +35,8 @@ public sealed record AssetAudit(long Meshes, long Vertices, long Triangles, int 
 public sealed class PreparedAsset : IDisposable
 {
     private readonly GlbImportSnapshot _snapshot;
+    private int _users;
+    private bool _disposeRequested, _disposed;
     internal PreparedAsset(GlbImportSnapshot snapshot, RhinoDoc staging, AssetAudit audit, string documentSessionId, uint documentSerial)
     {
         _snapshot = snapshot; SnapshotPath = snapshot.Path; Sha256 = snapshot.Sha256; Staging = staging; Audit = audit;
@@ -54,10 +56,33 @@ public sealed class PreparedAsset : IDisposable
         if (!string.Equals(Convert.ToHexString(SHA256.HashData(stream)), Sha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The preview asset is missing or changed. Reload it."));
     }
+    // Native import can pump UI events, including panel close/clear. Keep the
+    // prepared document and snapshot alive until the current commit finishes.
+    internal IDisposable Retain()
+    {
+        if (_disposeRequested) throw new ObjectDisposedException(nameof(PreparedAsset));
+        _users++;
+        return new AssetUse(this);
+    }
     public void Dispose()
     {
+        _disposeRequested = true;
+        if (_users != 0 || _disposed) return;
+        _disposed = true;
         try { Staging.Dispose(); }
         finally { _snapshot.Dispose(); }
+    }
+    private sealed class AssetUse(PreparedAsset asset) : IDisposable
+    {
+        private PreparedAsset? _asset = asset;
+        public void Dispose()
+        {
+            PreparedAsset? current = _asset;
+            if (current is null) return;
+            _asset = null;
+            current._users--;
+            if (current._disposeRequested) current.Dispose();
+        }
     }
 }
 
@@ -178,6 +203,7 @@ public sealed class Lux3DHostService : IDisposable
     public ImportReceipt Commit(PreparedAsset asset, PlacementIntent placement, Guid importId, Guid? generationOperationId = null, HostImportTrace? trace = null)
     {
         RequireUiThread();
+        using IDisposable assetUse = asset.Retain();
         trace?.Record("commit_start");
         if (importId == Guid.Empty) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("The import ID cannot be empty."), nameof(importId));
         RhinoDoc doc = RhinoDoc.FromRuntimeSerialNumber(asset.DocumentSerial) ?? throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The target document is closed."));
@@ -191,7 +217,18 @@ public sealed class Lux3DHostService : IDisposable
             if (_receipts.ContainsKey((doc.RuntimeSerialNumber, importId))) return InspectReceipt(doc, importId);
             throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("This import failed and cannot be replayed automatically. Inspect the document before explicitly creating a new import."));
         }
-        if (doc.UndoRecordingIsActive) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Finish the current Rhino command before accepting a candidate."));
+        if (doc.IsClosing || doc.IsReadOnly)
+            throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The target document is not writable."));
+        // Disposable headless documents are used by the native acceptance harness.
+        // Interactive imports must remain attached to the active model document.
+        if (!doc.IsHeadless)
+        {
+            if (RhinoDoc.ActiveDoc?.RuntimeSerialNumber != doc.RuntimeSerialNumber)
+                throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Activate the document linked to this panel before placing the model."));
+            if (doc.Views.ActiveView is RhinoPageView { PageIsActive: true })
+                throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("The current view is layout paper space. Switch to a model view or activate a layout detail before placing the model."));
+        }
+        if ((!doc.IsHeadless && doc.IsCommandRunning) || doc.UndoRecordingIsActive) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Finish the current Rhino command before accepting a candidate."));
         int targetLayerIndex = doc.Layers.CurrentLayerIndex;
         asset.Verify();
         string durableImportPath = PersistImportSnapshot(asset);

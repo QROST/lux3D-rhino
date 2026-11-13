@@ -48,6 +48,13 @@ public static class LocalText
     internal static IReadOnlyDictionary<string, string> ChineseCatalog => Chinese;
     private static readonly Dictionary<string, string> Chinese = new(StringComparer.Ordinal)
     {
+        ["The PBR fixture has no resolvable texture evidence. Material acceptance remains incomplete."] = "PBR 夹具没有可解析的贴图证据，材质验收尚未完成。",
+        ["A material texture resource is missing or unresolved. Equal missing resources do not pass save/reopen verification."] = "材质贴图资源缺失或无法解析；保存前后同样缺失不能视为保存重开验证通过。",
+        ["Provider status: {0}"] = "服务原始状态：{0}",
+        ["Next query: {0}"] = "下次查询：{0}",
+        ["The task record cannot be read safely. Its original file has been preserved."] = "无法安全读取任务记录，原始文件已保留。",
+        ["Unreadable task record"] = "无法读取的任务记录",
+        ["This task record cannot be read. The original file is preserved. Check the provider's history before generating again; another generation may incur a duplicate charge."] = "此任务记录无法读取，原始文件已保留。再次生成前请核对服务端历史，否则可能重复扣费。",
         ["The GLB hash does not match the task record."] = "GLB 哈希与任务记录不一致。",
         ["Unsupported image size."] = "图片大小不支持。",
         ["Invalid PNG header."] = "PNG 头无效。",

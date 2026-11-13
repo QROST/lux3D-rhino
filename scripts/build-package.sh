@@ -27,19 +27,12 @@ CHECKS=skipped
 if [ "$SKIP_TESTS" -eq 0 ]; then
   dotnet test Lux3D.Rhino.sln --configuration Release --no-build --no-restore
   python3 scripts/create-fixtures.py --check
+  python3 -m unittest discover -s scripts -p 'test_*.py'
   CHECKS=passed
 fi
 mkdir -p artifacts
 STAGE="$(mktemp -d "$ROOT/artifacts/package-mac.XXXXXX")"
-cp -R src/Lux3D.Rhino/bin/Release/net7.0/. "$STAGE/"
-mkdir -p "$STAGE/sidecar" "$STAGE/fixtures"
-cp -R src/Lux3D.Sidecar/bin/Release/net8.0/. "$STAGE/sidecar/"
-# A previous RID build can leave an apphost behind. Only remove these copies in the new staging directory.
-rm -f "$STAGE/sidecar/Lux3D.Sidecar" "$STAGE/sidecar/Lux3D.Sidecar.exe"
-cp packaging/manifest.yml "$STAGE/"
-cp LICENSE NOTICE readme.md readme.zh-CN.md "$STAGE/"
-cp -R docs "$STAGE/"
-cp fixtures/*.glb fixtures/manifest.json fixtures/README.md "$STAGE/fixtures/"
+python3 scripts/stage-package.py "$STAGE"
 (cd "$STAGE" && "$YAK" build --platform mac)
 python3 scripts/record-package.py "$STAGE" --platform mac --checks "$CHECKS"
 printf '\nCandidate only. Host/account acceptance remains separate.\n'

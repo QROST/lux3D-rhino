@@ -16,19 +16,33 @@ internal sealed class RestGenerationProvider : IGenerationProvider
     }
     public async Task<string> CreateAsync(GenerationInput input, CancellationToken ct)
     {
+        bool generationStarted = false;
         try
         {
             if (input.ImagePath is null)
+            {
+                generationStarted = true;
                 return await _api.CreateTextAsync(input.Prompt, input.Model, input.FaceCount, input.EnablePbr, ct).ConfigureAwait(false);
+            }
             Uri image = await _api.UploadImageAsync(input.ImagePath, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            generationStarted = true;
             return await _api.CreateImageAsync(image, input.Model, input.FaceCount, input.EnablePbr, ct).ConfigureAwait(false);
         }
         catch (ProviderException ex) when (!ex.SubmissionMayHaveSucceeded)
         { throw new SubmissionRejectedException(ex.Message); }
+        catch (Exception ex) when (!generationStarted && ex is OperationCanceledException or IOException or HttpRequestException or UnauthorizedAccessException or ArgumentException)
+        {
+            // Uploading alone never creates a generation. Do not make a failed upload
+            // block future tasks as a possible duplicate charge, or expose raw IO details.
+            throw new SubmissionRejectedException(global::Lux3D.Core.LocalText.Get("Image upload failed."));
+        }
     }
     public async Task<RemoteTask> QueryAsync(string taskId, CancellationToken ct)
     {
-        ProviderTask task = await _api.GetTaskAsync(taskId, ct).ConfigureAwait(false);
+        ProviderTask task;
+        try { task = await _api.GetTaskAsync(taskId, ct).ConfigureAwait(false); }
+        catch (ProviderException ex) { throw new QueryRetryException(ex.Message, ex.RetryAt); }
         string state = task.State switch
         {
             "queued" => "Queued", "running" => "Running", "succeeded" => "Succeeded", "failed" => "Failed", "cancelled" => "ProviderCancelled", _ => "StatusUnknown"

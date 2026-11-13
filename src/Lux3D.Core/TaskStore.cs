@@ -20,17 +20,45 @@ public sealed class TaskStore
     public TaskRecord Get(Guid id)
     {
         string path = PathFor(id);
-        if (!File.Exists(path)) throw new IOException(global::Lux3D.Core.LocalText.Get("The task record is missing or too large."));
-        // Readers keep their original snapshot while another process atomically replaces the file.
-        // Windows requires delete sharing for that replacement; length and content use one handle.
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-        if (stream.Length > 128 * 1024) throw new IOException(global::Lux3D.Core.LocalText.Get("The task record is missing or too large."));
-        using var reader = new StreamReader(stream);
-        TaskRecord record = JsonSerializer.Deserialize<TaskRecord>(reader.ReadToEnd(), LuxJson.Options) ?? throw new IOException(global::Lux3D.Core.LocalText.Get("The task record is corrupt."));
-        return record with { Error = LocalText.RecordedMessage(record.Error) };
+        try
+        {
+            if (!File.Exists(path)) throw new IOException(global::Lux3D.Core.LocalText.Get("The task record is missing or too large."));
+            // Readers keep their original snapshot while another process atomically replaces the file.
+            // Windows requires delete sharing for that replacement; length and content use one handle.
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            if (stream.Length > 128 * 1024) throw new IOException(global::Lux3D.Core.LocalText.Get("The task record is missing or too large."));
+            using var reader = new StreamReader(stream);
+            TaskRecord record = JsonSerializer.Deserialize<TaskRecord>(reader.ReadToEnd(), LuxJson.Options) ?? throw new IOException(global::Lux3D.Core.LocalText.Get("The task record is corrupt."));
+            if (!IsValidRecord(record, id)) throw new IOException(global::Lux3D.Core.LocalText.Get("The task record is corrupt."));
+            return record with { Error = LocalText.RecordedMessage(record.Error) };
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        { throw new IOException(global::Lux3D.Core.LocalText.Get("The task record cannot be read safely. Its original file has been preserved.")); }
     }
-    private IEnumerable<TaskRecord> Records() => Directory.EnumerateFiles(Path.Combine(Root, "tasks"), "*.json")
-        .Select(p => Get(Guid.ParseExact(Path.GetFileNameWithoutExtension(p), "N")))
+    private static bool IsValidRecord(TaskRecord record, Guid id) => id != Guid.Empty && record.OperationId == id &&
+        !string.IsNullOrWhiteSpace(record.Region) && record.Prompt is not null &&
+        !string.IsNullOrWhiteSpace(record.Model) && !string.IsNullOrWhiteSpace(record.State) && record.ConnectionId is not null;
+    private static bool TryRecordId(string path, out Guid id) =>
+        Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out id) && id != Guid.Empty &&
+        string.Equals(Path.GetFileName(path), id.ToString("N") + ".json", StringComparison.Ordinal);
+    private IEnumerable<string> RecordPaths() => Directory.EnumerateFiles(Path.Combine(Root, "tasks"))
+        .Where(p => string.Equals(Path.GetExtension(p), ".json", StringComparison.OrdinalIgnoreCase));
+    private TaskRecord ReadForHistory(Guid id)
+    {
+        try { return Get(id); }
+        catch (IOException)
+        {
+            // Display-only: empty binding makes this invalid for Save; Get still throws,
+            // so refresh can never overwrite the original bytes using this placeholder.
+            return new(id, "", global::Lux3D.Core.LocalText.Get("Unreadable task record"), null, "", 0,
+                "SubmissionUnknown", null, null, null,
+                global::Lux3D.Core.LocalText.Get("This task record cannot be read. The original file is preserved. Check the provider's history before generating again; another generation may incur a duplicate charge."),
+                DateTimeOffset.MinValue);
+        }
+    }
+    private IEnumerable<TaskRecord> Records() => RecordPaths()
+        .Where(p => TryRecordId(p, out _))
+        .Select(p => { TryRecordId(p, out Guid id); return ReadForHistory(id); })
         .Select(t => t.State is "Submitting" or "Uploading" ? t with { State = "SubmissionUnknown", Error = global::Lux3D.Core.LocalText.Get("The previous submission was interrupted. Automatic resubmission is disabled; check the provider's task history.") } :
             t.State == "Ready" && !File.Exists(t.AssetPath) ? t with { State = "Missing", Error = global::Lux3D.Core.LocalText.Get("The local asset is missing. Query the original task to download it again.") } : t)
         .OrderByDescending(t => t.CreatedAt);
@@ -39,9 +67,11 @@ public sealed class TaskStore
         if (offset < 0 || limit is < 1 or > 30) throw new ArgumentOutOfRangeException(nameof(limit), global::Lux3D.Core.LocalText.Get("History pages must contain 1 to 30 records."));
         return Records().Skip(offset).Take(limit).ToArray();
     }
-    public bool HasUnknownSubmissions() => Records().Any(t => t.State == "SubmissionUnknown");
+    public bool HasUnknownSubmissions() => RecordPaths().Any(p =>
+        !TryRecordId(p, out Guid id) || ReadForHistory(id).State is "SubmissionUnknown" or "Submitting" or "Uploading");
     public void Save(TaskRecord task)
     {
+        if (!IsValidRecord(task, task.OperationId)) throw new ArgumentException(global::Lux3D.Core.LocalText.Get("The task record is corrupt."), nameof(task));
         string file = PathFor(task.OperationId);
         WriteAtomic(file, JsonSerializer.SerializeToUtf8Bytes(task, LuxJson.Options));
     }

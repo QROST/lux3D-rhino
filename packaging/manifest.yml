@@ -1,5 +1,5 @@
 name: lux3d-rhino
-version: 0.1.4-beta.4
+version: 0.1.4-beta.6
 authors:
   - CuriousArc
   - qrost
@@ -8,7 +8,7 @@ description: >-
   text-to-3D and single-image-to-3D generation, GLB candidate previews, and
   native Block placement. Requires Rhino 8.32+, .NET 8 Runtime, and your own
   regional Aholo API Key. Manycore OAuth sign-in is optional and does not
-  replace the API Key. This macOS beta defaults to English, with Simplified
+  replace the API Key. This preview defaults to English, with Simplified
   Chinese selected from Rhino or system UI language, and includes clearer
   placement feedback and cached preview transforms. Native language/layout
   checks, full PBR, Undo/Redo, and Windows host acceptance remain pending.

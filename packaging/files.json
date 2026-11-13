@@ -1,0 +1,55 @@
+[
+  {
+    "source": "src/Lux3D.Rhino/bin/Release/net7.0",
+    "destination": "",
+    "files": [
+      "Lux3D.Rhino.rhp",
+      "Lux3D.Rhino.deps.json",
+      "Lux3D.Rhino.pdb",
+      "Lux3D.Core.dll",
+      "Lux3D.Core.pdb"
+    ]
+  },
+  {
+    "source": "src/Lux3D.Sidecar/bin/Release/net8.0",
+    "destination": "sidecar",
+    "files": [
+      "Lux3D.Sidecar.dll",
+      "Lux3D.Sidecar.deps.json",
+      "Lux3D.Sidecar.runtimeconfig.json",
+      "Lux3D.Sidecar.pdb",
+      "Lux3D.Provider.dll",
+      "Lux3D.Provider.pdb",
+      "Lux3D.Core.dll",
+      "Lux3D.Core.pdb"
+    ]
+  },
+  {
+    "source": "",
+    "destination": "",
+    "files": [
+      "LICENSE",
+      "NOTICE",
+      "readme.md",
+      "readme.zh-CN.md",
+      "docs/architecture.md",
+      "docs/provider-contract.md",
+      "docs/rhino-integration.md",
+      "docs/verification.md",
+      "docs/logo-aholo.png",
+      "docs/Screenshot 2026-11-01 at 01.10.25.png",
+      "fixtures/asymmetric-geometry.glb",
+      "fixtures/asymmetric-pbr.glb",
+      "fixtures/manifest.json",
+      "fixtures/README.md",
+      "docs/hackathon-delivery.md"
+    ]
+  },
+  {
+    "source": "packaging",
+    "destination": "",
+    "files": [
+      "manifest.yml"
+    ]
+  }
+]

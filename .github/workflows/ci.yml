@@ -1,0 +1,33 @@
+name: build-and-test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-validation:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore Lux3D.Rhino.sln
+      - name: Build
+        run: dotnet build Lux3D.Rhino.sln --configuration Release --no-restore
+      - name: Offline tests
+        run: dotnet test Lux3D.Rhino.sln --configuration Release --no-build --no-restore
+      - name: Verify deterministic fixtures
+        run: python scripts/create-fixtures.py --check
+      - name: Verify package isolation
+        run: python -m unittest discover -s scripts -p 'test_*.py'

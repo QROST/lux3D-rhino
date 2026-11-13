@@ -8,6 +8,11 @@ public sealed class SubmissionRejectedException : Exception
 {
     public SubmissionRejectedException(string message) : base(message) { }
 }
+public sealed class QueryRetryException : Exception
+{
+    public DateTimeOffset? RetryAt { get; }
+    public QueryRetryException(string message, DateTimeOffset? retryAt = null) : base(message) { RetryAt = retryAt; }
+}
 public interface IGenerationProvider
 {
     string Region { get; }
@@ -20,10 +25,18 @@ public interface IGenerationProvider
 public sealed class Workflow
 {
     private readonly TaskStore _store;
-    public Workflow(TaskStore store) { _store = store; }
+    private readonly Func<DateTimeOffset> _utcNow;
+    private readonly Func<double> _random;
+    public Workflow(TaskStore store, Func<DateTimeOffset>? utcNow = null, Func<double>? random = null)
+    {
+        _store = store;
+        _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+        _random = random ?? (() => Random.Shared.NextDouble());
+    }
     public async Task<TaskRecord> GenerateAsync(IGenerationProvider provider, GenerationInput input, CancellationToken ct = default)
     {
         ValidateInput(input);
+        ct.ThrowIfCancellationRequested();
         using var mutation = _store.LockMutation();
         if (_store.HasUnknownSubmissions() && !input.AcknowledgeUnknownSubmission)
             throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("A task has an unknown submission result. Check the original account's history and explicitly confirm that another generation may incur a duplicate charge."));
@@ -36,8 +49,10 @@ public sealed class Workflow
         }
         else inputHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input.Prompt))).ToLowerInvariant();
         input = input with { ImagePath = image };
+        // Cancellation before the durable submission boundary cannot have consumed credits.
+        ct.ThrowIfCancellationRequested();
         var task = new TaskRecord(Guid.NewGuid(), provider.Region, input.Prompt, image, input.Model, input.FaceCount,
-            "Submitting", null, null, null, null, DateTimeOffset.UtcNow, provider.ConnectionId, input.EnablePbr, inputHash);
+            "Submitting", null, null, null, null, _utcNow(), provider.ConnectionId, input.EnablePbr, inputHash);
         // The durable preflight must finish before any upload or paid create call.
         _store.Save(task);
         try
@@ -68,8 +83,15 @@ public sealed class Workflow
         TaskRecord task = _store.Get(operationId);
         if (task.Region != provider.Region || task.ConnectionId != provider.ConnectionId)
             throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("Restore the region and connection used to submit this task; it cannot be queried with another account."));
-        if (task.TaskId is null)
-            return task with { State = "SubmissionUnknown", Error = global::Lux3D.Core.LocalText.Get("The task ID is missing; automatic resubmission is disabled. Check the original account's history.") };
+        if (string.IsNullOrWhiteSpace(task.TaskId))
+        {
+            // An explicit creation rejection is conclusive even though no remote ID exists.
+            if (task.State == "Failed") return task;
+            task = task with { State = "SubmissionUnknown", Error = global::Lux3D.Core.LocalText.Get("The task ID is missing; automatic resubmission is disabled. Check the original account's history.") };
+            _store.Save(task);
+            return task;
+        }
+        if (task.NextQueryAt is { } nextQuery && nextQuery > _utcNow()) return task;
         if (task.State == "Ready" && task.AssetPath is not null && File.Exists(task.AssetPath))
         {
             await using var cached = File.OpenRead(task.AssetPath);
@@ -78,11 +100,16 @@ public sealed class Workflow
             task = task with { State = "Missing", Error = global::Lux3D.Core.LocalText.Get("The asset hash differs; retrieving the original task result again.") };
         }
         bool succeeded = task.State is "Succeeded" or "DownloadFailed" or "Downloading";
+        bool queryCompleted = false;
         byte[]? downloaded = null;
         try
         {
             RemoteTask remote = await provider.QueryAsync(task.TaskId, ct).ConfigureAwait(false);
-            task = task with { State = remote.State, Error = null };
+            if (!string.Equals(remote.TaskId, task.TaskId, StringComparison.Ordinal))
+                throw new IOException(global::Lux3D.Core.LocalText.Get("The service returned an invalid task ID."));
+            queryCompleted = true;
+            task = task with { State = remote.State, Error = null, RawStatus = remote.RawStatus,
+                NextQueryAt = null, QueryFailures = 0 };
             _store.Save(task);
             succeeded = remote.State == "Succeeded";
             if (!succeeded) return task;
@@ -92,6 +119,21 @@ public sealed class Workflow
             var asset = _store.StoreAsset(downloaded);
             task = task with { State = "Ready", AssetPath = asset.Path, AssetSha256 = asset.Hash, Error = null,
                 ValidationCode = null, RejectedAssetPath = null, RejectedAssetSha256 = null };
+        }
+        catch (Exception ex) when (!queryCompleted)
+        {
+            int failures = Math.Clamp(task.QueryFailures, 0, 30) + 1;
+            double sample = _random();
+            double jitter = double.IsFinite(sample) ? Math.Clamp(sample, 0, 1) : 0;
+            // Cap the base before adding jitter, so repeated outages do not synchronize
+            // every client at exactly 120 seconds once exponential growth saturates.
+            double seconds = Math.Min(100, 5 * Math.Pow(2, Math.Min(failures - 1, 5))) * (1 + 0.2 * jitter);
+            DateTimeOffset retryAt = _utcNow().AddSeconds(seconds);
+            if (ex is QueryRetryException { RetryAt: { } providerRetry } && providerRetry > retryAt)
+                retryAt = providerRetry;
+            task = task with { State = succeeded ? "DownloadFailed" : "StatusUnknown", QueryFailures = failures,
+                NextQueryAt = retryAt,
+                Error = global::Lux3D.Core.LocalText.Get("The status query is temporarily unavailable. Query the original task again; no new task will be created.") };
         }
         catch (AssetValidationException ex)
         {

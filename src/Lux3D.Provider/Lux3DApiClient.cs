@@ -59,7 +59,7 @@ public sealed class Lux3DApiClient
         using var request = Gateway(HttpMethod.Get, "lux3d/v1/generate/task/get?taskid=" + canonical);
         var data = await SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (data.ValueKind != JsonValueKind.Object || !data.TryGetProperty("taskId", out var id) || ProviderValidation.TaskId(Scalar(id)) != canonical ||
-            !data.TryGetProperty("bizId", out var biz) || biz.GetString() != "LUX_3D" || !data.TryGetProperty("status", out var state) || !state.TryGetInt32(out int status))
+            !data.TryGetProperty("bizId", out var biz) || biz.ValueKind != JsonValueKind.String || biz.GetString() != "LUX_3D" || !data.TryGetProperty("status", out var state) || state.ValueKind != JsonValueKind.Number || !state.TryGetInt32(out int status))
             throw new ProviderException("invalid_task", global::Lux3D.Core.LocalText.Get("The task response identity or state does not match."));
         string localState = status switch { 0 => "queued", 1 or 2 => "running", 3 => "succeeded", 4 or 5 => "failed", 6 => "cancelled", _ => "unknown" };
         if (status != 3) return new(canonical, status, localState, null);
@@ -129,6 +129,7 @@ public sealed class Lux3DApiClient
             int total = (int)((bytes.LongLength + blockSize - 1) / blockSize);
             using var init = new FormUrlEncodedContent(new Dictionary<string, string> { ["md5"] = md5, ["blocks"] = total.ToString(CultureInfo.InvariantCulture), ["size"] = bytes.Length.ToString(CultureInfo.InvariantCulture), ["name"] = Path.GetFileName(path) });
             var initialized = await SendOusAsync(host, ousToken, "block/upload/init", init, cancellationToken).ConfigureAwait(false);
+            if (initialized.ValueKind != JsonValueKind.Object) throw new ProviderException("invalid_upload", global::Lux3D.Core.LocalText.Get("Invalid upload status format."));
             bool deduplicated = initialized.TryGetProperty("deduplicated", out var dedup) && dedup.ValueKind == JsonValueKind.True;
             if (!deduplicated)
             {
@@ -146,7 +147,7 @@ public sealed class Lux3DApiClient
         for (int attempt = 0; attempt < 120; attempt++)
         {
             var result = await SendOusAsync(host, ousToken, "upload/status", null, cancellationToken).ConfigureAwait(false);
-            if (!result.TryGetProperty("status", out var status) || !status.TryGetInt32(out int value)) throw new ProviderException("invalid_upload", global::Lux3D.Core.LocalText.Get("Invalid upload status format."));
+            if (result.ValueKind != JsonValueKind.Object || !result.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.Number || !status.TryGetInt32(out int value)) throw new ProviderException("invalid_upload", global::Lux3D.Core.LocalText.Get("Invalid upload status format."));
             if (value == 5) return ProviderValidation.HttpsUri(RequiredString(result, "url"));
             if (value is 6 or 8) throw new ProviderException("upload_failed", global::Lux3D.Core.LocalText.Get("Image upload failed."));
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
@@ -172,7 +173,8 @@ public sealed class Lux3DApiClient
             if (!response.IsSuccessStatusCode)
             {
                 string code = response.StatusCode == HttpStatusCode.Unauthorized ? "unauthenticated" : response.StatusCode == HttpStatusCode.TooManyRequests ? "rate_limited" : "http_error";
-                throw new ProviderException(code, code == "unauthenticated" ? global::Lux3D.Core.LocalText.Get("The API key for the selected region is invalid or expired.") : global::Lux3D.Core.LocalText.Format("Service request failed (HTTP {0}).", (int)response.StatusCode), isCreate && (int)response.StatusCode >= 500);
+                throw new ProviderException(code, code == "unauthenticated" ? global::Lux3D.Core.LocalText.Get("The API key for the selected region is invalid or expired.") : global::Lux3D.Core.LocalText.Format("Service request failed (HTTP {0}).", (int)response.StatusCode), isCreate && (int)response.StatusCode >= 500,
+                    retryAt: !isCreate ? RetryDeadline(response) : null);
             }
             if (response.Content.Headers.ContentLength > JsonLimit) throw new JsonException();
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
@@ -183,16 +185,28 @@ public sealed class Lux3DApiClient
             using var document = JsonDocument.Parse(buffer.ToArray());
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("c", out var codeElement) || !root.TryGetProperty("d", out var data)) throw new JsonException();
-            if (Scalar(codeElement) != "0") throw new ProviderException("business_rejected", global::Lux3D.Core.LocalText.Get("The service rejected the request. Check account permissions, balance and parameters on the official platform."));
+            // A malformed envelope is not proof that a billable create was rejected.
+            string? responseCode = Scalar(codeElement);
+            if (string.IsNullOrWhiteSpace(responseCode)) throw new JsonException();
+            if (responseCode != "0") throw new ProviderException("business_rejected", global::Lux3D.Core.LocalText.Get("The service rejected the request. Check account permissions, balance and parameters on the official platform."));
             return data.Clone();
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or OperationCanceledException)
+        catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or OperationCanceledException)
         {
             if (isCreate) throw new ProviderException("submission_unknown", global::Lux3D.Core.LocalText.Get("The generation request has an unknown result. Check task history; do not resubmit."), true);
             if (ex is OperationCanceledException) throw;
             throw new ProviderException("request_failed", global::Lux3D.Core.LocalText.Get("Service request failed or returned an invalid response."));
         }
     }
-    private static string RequiredString(JsonElement value, string property) => value.TryGetProperty(property, out var field) && field.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(field.GetString()) ? field.GetString()! : throw new ProviderException("invalid_response", global::Lux3D.Core.LocalText.Get("The service response is missing a required field."));
+    private static DateTimeOffset? RetryDeadline(HttpResponseMessage response)
+    {
+        if (!response.Headers.TryGetValues("Retry-After", out var values) ||
+            !System.Net.Http.Headers.RetryConditionHeaderValue.TryParse(values.FirstOrDefault(), out var retry)) return null;
+        if (retry.Date is { } date) return date;
+        if (retry.Delta is not { } delay) return null;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        return delay >= DateTimeOffset.MaxValue - now ? DateTimeOffset.MaxValue : now + delay;
+    }
+    private static string RequiredString(JsonElement value, string property) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(property, out var field) && field.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(field.GetString()) ? field.GetString()! : throw new ProviderException("invalid_response", global::Lux3D.Core.LocalText.Get("The service response is missing a required field."));
     private static string? Scalar(JsonElement value) => value.ValueKind switch { JsonValueKind.String => value.GetString(), JsonValueKind.Number => value.GetRawText(), _ => null };
 }

@@ -50,6 +50,7 @@ public static class Lux3DSelfTest
         byte[] fixture = File.ReadAllBytes(fixturePath);
         Lux3D.Core.GlbContainerValidator.Validate(fixture);
         string sha = Convert.ToHexString(SHA256.HashData(fixture)).ToLowerInvariant();
+        bool requiresTextures = sha == "54b0beb3e3248667cd24aa3afc97373b94cb22ac4101fb2663ffc414f1fc8382";
         bool canonicalFixture = sha is "54b0beb3e3248667cd24aa3afc97373b94cb22ac4101fb2663ffc414f1fc8382" or "97d19134ec64335bd18bf634092d7af21d4e6de3554a85683f294c97dc7ba131";
         if (!canonicalFixture) throw new InvalidOperationException(global::Lux3D.Core.LocalText.Get("This deterministic test only accepts the repository's fixed-SHA-256 asymmetric fixture. Load ordinary GLB files from the panel."));
         string directory = Path.Combine(outputDirectory, "lux3d-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
@@ -98,6 +99,40 @@ public static class Lux3DSelfTest
                 }
                 var intent = new PlacementIntent(Plane.WorldXY, new Point3d(2 * height, -3 * height, height), height, 37);
                 CheckValue(checks, label + "/preview-cache-transform-lifecycle", () => VerifyPreview(document, asset, intent, tolerance));
+                CheckValue(checks, label + "/prepared-asset-close-during-use", () =>
+                {
+                    using PreparedAsset retained = host.Prepare(fixturePath, sha, document);
+                    string snapshot = retained.SnapshotPath;
+                    using (IDisposable use = retained.Retain())
+                    {
+                        retained.Dispose(); // Simulate panel cleanup during native import.
+                        retained.Verify();
+                        Require(File.Exists(snapshot), "Panel cleanup removed an in-use import snapshot.");
+                        bool refusedNewUse = false;
+                        try { using IDisposable unexpected = retained.Retain(); }
+                        catch (ObjectDisposedException) { refusedNewUse = true; }
+                        Require(refusedNewUse, "A closing candidate accepted a new import.");
+                    }
+                    Require(!File.Exists(snapshot), "The import snapshot was not released after its final user finished.");
+                    retained.Dispose();
+                    return new { retainedDuringImport = true, releasedAfterImport = true };
+                });
+                CheckValue(checks, label + "/reject-nested-undo-before-mutation", () =>
+                {
+                    Guid[] before = Lux3DHostService.Objects(document).Select(o => o.Id).ToArray();
+                    uint undo = document.BeginUndoRecord("Lux3D self-test guarded import");
+                    Require(undo != 0, "Could not start the guard-test undo record.");
+                    bool rejected = false;
+                    try
+                    {
+                        try { host.Commit(asset, intent, Guid.NewGuid()); }
+                        catch (InvalidOperationException) { rejected = true; }
+                    }
+                    finally { document.EndUndoRecord(undo); }
+                    Require(rejected && before.SequenceEqual(Lux3DHostService.Objects(document).Select(o => o.Id)),
+                        "Import during an existing undo record was not rejected without mutation.");
+                    return new { rejectedBeforeMutation = true };
+                });
                 Guid importId = Guid.NewGuid();
                 ImportReceipt receipt = host.Commit(asset, intent, importId);
                 CheckValue(checks, label + "/one-block-and-replay", () =>
@@ -122,6 +157,7 @@ public static class Lux3DSelfTest
                 string saved = Path.Combine(directory, label + ".3dm");
                 CheckValue(checks, label + "/save-reopen", () =>
                 {
+                    int resolvedTexturesBefore = VerifyMaterialResources(materialBefore, requiresTextures);
                     using var options = new FileWriteOptions { IncludeBitmapTable = true, IncludeRenderMeshes = true,
                         SuppressDialogBoxes = true, SuppressAllInput = true, UpdateDocumentPath = false, WriteUserData = true };
                     Require(document.Write3dmFile(saved, options), global::Lux3D.Core.LocalText.Get("Could not write the test 3dm."));
@@ -136,9 +172,11 @@ public static class Lux3DSelfTest
                     AssetAudit audit = Lux3DHostService.Audit(objects);
                     Require(audit.Triangles == asset.Audit.Triangles, global::Lux3D.Core.LocalText.Get("Triangle count changed after saving and reopening."));
                     object after = MaterialEvidence(objects);
+                    int resolvedTexturesAfter = VerifyMaterialResources(after, requiresTextures);
                     string first = JsonSerializer.Serialize(materialBefore), second = JsonSerializer.Serialize(after);
                     Require(first == second, global::Lux3D.Core.LocalText.Get("Material/texture evidence differs after reopening."));
                     return new { file = Path.GetFileName(moved), audit.Triangles, material = after,
+                        resolvedTexturesBefore, resolvedTexturesAfter,
                         crossProcessMigrationVerified = false, renderedVisualVerified = false };
                 });
                 CheckValue(checks, label + "/manual-delete-receipt", () =>
@@ -297,6 +335,36 @@ public static class Lux3DSelfTest
         }
         Require(maxError <= tolerance, global::Lux3D.Core.LocalText.Get("The transform differs from the expected full U/V/N plane basis."));
         return new { maxError, tolerance, height = placement.Height, angle = placement.RotationDegrees };
+    }
+    private static int VerifyMaterialResources(object evidence, bool requiresTextures)
+    {
+        // Equality alone lets missing-before == missing-after pass. This checks
+        // resolvable resources, not the channel mapping or Rendered appearance.
+        int count = CountResolvedTextures(JsonSerializer.SerializeToElement(evidence));
+        Require(!requiresTextures || count > 0,
+            global::Lux3D.Core.LocalText.Get("The PBR fixture has no resolvable texture evidence. Material acceptance remains incomplete."));
+        return count;
+    }
+    private static int CountResolvedTextures(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Array)
+            return value.EnumerateArray().Sum(CountResolvedTextures);
+        if (value.ValueKind != JsonValueKind.Object) return 0;
+        int count = 0;
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            if (property.Name is "sha256" or "textureSha256")
+            {
+                // Null denotes no file-backed resource, e.g. a procedural material.
+                if (property.Value.ValueKind == JsonValueKind.Null) continue;
+                string? hash = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : null;
+                Require(hash is not null && hash.Length == 64 && hash.All(Uri.IsHexDigit),
+                    global::Lux3D.Core.LocalText.Get("A material texture resource is missing or unresolved. Equal missing resources do not pass save/reopen verification."));
+                count++;
+            }
+            else count += CountResolvedTextures(property.Value);
+        }
+        return count;
     }
     private static object MaterialEvidence(IEnumerable<RhinoObject> roots)
     {

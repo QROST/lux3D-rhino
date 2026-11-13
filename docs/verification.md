@@ -163,3 +163,34 @@ This macOS / Rhino 8.32+ preview includes the language-selection implementation 
 The preceding implementation checks passed: Release build with **0 warnings / 0 errors**, Core **123/123** and Provider **39/39** offline tests. English, Simplified Chinese and Traditional Chinese sidecar locale cases produced the expected translated offline error responses. These checks did not use real credentials, call generation services or control Rhino. The final package build will rerun the automated checks; installation and Yak publication results will be recorded separately after completion.
 
 This release retains **CuriousArc / qrost** attribution. A regional API Key is still required for generation; optional Manycore OAuth sign-in does not replace it. Full PBR, Undo/Redo, save/reopen and Windows host acceptance remain pending. No Windows distribution is included in this release. The official Yak search on 2026-11-06 returned beta.1 and beta.2; beta.4 was unused, and beta.3 remains a historical local-only package.
+
+
+## 2026-11-13 公开状态复核与 beta.5 产品加固
+
+只读复核官方 Yak 版本接口，`0.1.4-beta.4` 已于 `2026-11-06T22:34:42Z` 发布，分发为 `rh8_32-mac`、prerelease。公开包 **2,741,242 字节**，SHA-256 **`94a6e523824e191291a55e1b8f53384c393d35c3d6ff7a168558609e1a521cd5`**，与本地 beta.4 记录相符。此前本文件只写到发布候选，现补上公开状态。GitHub main 为 `29a73abbdd50587036930ba6c45436dcd6da2ea9`，Releases 和 tags 公开列表均为空；源码同步不等于存在 GitHub Release。
+
+本轮在原干净工作树上准备 **0.1.4-beta.5 本地候选**：
+
+- 保留明确提交拒绝的失败状态，持久化缺失回执状态；预先取消不产生虚假提交，查询结果必须与原任务 ID 一致。
+- 损坏或身份错配的历史记录不再阻断正常历史，使用不可读占位并保留原文件；仍保守阻止未经明确确认的后续生成，不能刷新或保存占位覆盖原始记录。
+- 畸形服务回执不能被误当作确定拒绝；已开始生成但回执丢失仍防重复提交。上传未进入生成阶段就失败或取消，则不会错误声称可能已创建收费任务。
+- 候选接受检查活动/可写文档、纸空间和运行命令；关闭面板时延迟清理仍在原生导入中使用的资源，预检返回后不恢复已经关闭的候选。
+- macOS/Windows 打包共用明确文件清单，排除未列入的私人文档和旧构建残留；离线回归覆盖污染、路径穿越、符号链接和缺失文件。
+- 加入双平台 GitHub Actions 构建/离线测试工作流；本轮尚未推送或执行在线 CI。
+
+原生自测扩充了资源使用中关闭与嵌套 Undo 拒绝检查；仅编译，不标为宿主执行通过。当前没有自动控制 Rhino、真实账户调用或新增收费任务。详细验收与真实录屏要求见 [hackathon-delivery.md](hackathon-delivery.md)。beta.5 仍未公开发布；最终自动测试和包记录在完成后补录。
+
+最终候选自动验证：Core **136/136**、Provider **68/68**，共 **204/204** 离线测试通过；**5/5** 打包隔离回归及两个 GLB 夹具再生检查通过。Release 编译 **0 warning / 0 error**。这些是本地自动检查，不等于原生宿主、Windows 或线上 CI 已验收。最终包路径与哈希保存在本地 `artifacts/latest-package-mac.json`。
+
+beta.5 本机交付补录：最终包 `artifacts/package-mac.WkUnT2/lux3d-rhino-0.1.4-beta.5-rh8_32-mac.yak`，SHA-256 `b8ded3690d7825d394fc939ae7101459af093ce40075ccd6a02b4b42af8f60c6`。官方 Yak 客户端本机安装成功，**29/29 文件**逐一匹配；证据为 `artifacts/install-verification-mac.json`。未启动或操作 Rhino；用户保存并重启后才会加载新版。此段为包生成后的补录，不改变上述归档。源码修改尚未提交/推送，beta.5 尚未公开发布。
+
+
+## 2026-11-13 P0 查询恢复补齐（beta.6 候选）
+
+逐项核对 PRD 后补齐两项实现缺口：查询错误以持久化截止时间控制指数退避并增加抖动，429/其他非成功响应的合法 Retry-After（秒数或 HTTP 日期）传递到工作流，重启不提前查询；成功查询保留 RawStatus 并清除失败计数。未知服务状态不作为成功下载。退避仅作用于查询原 task ID，不自动创建或重试生成。面板显示原始状态及下一次查询时间，后台跳过尚未到期任务。
+
+原生保存重开自测也已加强：不能以 missing==missing 判通过，PBR 夹具至少应存在可解析纹理证据。此检查仍不证明四通道映射、Rendered 视觉或跨进程资源迁移；fullP0Acceptance 保持 false，实际宿主尚未执行。
+
+本轮使用独立 beta.6 版本，保留已安装 beta.5 和历史归档。公开发布仍待授权；新增测试及安装证据随后补录。
+
+最终 beta.6 本地验证与安装：Release 编译 **0 warning / 0 error**，Core **146/146**、Provider **73/73**，合计 **219/219** 测试通过；Python 打包回归 **5/5**、两个固定 GLB 夹具再生检查通过。包为 `artifacts/package-mac.0CntHs/lux3d-rhino-0.1.4-beta.6-rh8_32-mac.yak`，SHA-256 `6898d0d740960669c403428d5faec8a76e9a2f1b22f61d3a9f2bb08efe01493e`，本机安装后 **29/29** 文件匹配。未运行 Rhino，未调用真实服务，未公开上传；本段为归档生成后补录。源码仍为未提交修改。
