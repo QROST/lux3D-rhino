@@ -194,3 +194,13 @@ beta.5 本机交付补录：最终包 `artifacts/package-mac.WkUnT2/lux3d-rhino-
 本轮使用独立 beta.6 版本，保留已安装 beta.5 和历史归档。公开发布仍待授权；新增测试及安装证据随后补录。
 
 最终 beta.6 本地验证与安装：Release 编译 **0 warning / 0 error**，Core **146/146**、Provider **73/73**，合计 **219/219** 测试通过；Python 打包回归 **5/5**、两个固定 GLB 夹具再生检查通过。包为 `artifacts/package-mac.0CntHs/lux3d-rhino-0.1.4-beta.6-rh8_32-mac.yak`，SHA-256 `6898d0d740960669c403428d5faec8a76e9a2f1b22f61d3a9f2bb08efe01493e`，本机安装后 **29/29** 文件匹配。未运行 Rhino，未调用真实服务，未公开上传；本段为归档生成后补录。源码仍为未提交修改。
+
+## 2026-11-13 用户授权后的公开发布
+
+源码提交 `56f4c15de5ce9f00b715afe233198c565a342fbe` 已推送 GitHub main，并从该干净提交重建 beta.6。Release 编译零警告/错误，219 项 .NET 测试、5 项打包测试、两个固定夹具检查通过。正式发布包 **2,756,195 字节**，SHA-256 **`b9becb3d34c71604c2322737d0405249605abe997dc76d885767f946efcdee35`**；这个哈希与先前未提交源码构建的本机候选不同，请以此标识公开包。
+
+Yak push 返回成功，官方公开版本接口确认 `0.1.4-beta.6` / `rh8_32-mac` / prerelease，公开下载重新计算哈希与发布包一致。GitHub 已创建 [v0.1.4-beta.6 Release](https://github.com/QROST/lux3D-rhino/releases/tag/v0.1.4-beta.6)，附同一 Yak 包和 SHA-256 文件，tag 指向上述源码提交。发布证据保存在 `artifacts/yak-publication-beta6/`。
+
+首次 Windows 线上 CI 的构建与 .NET 测试通过，但 fixture manifest 的逐字节检查失败；两个 GLB 哈希均正确。原因是 Git checkout 的 CRLF 转换改变了 JSON 清单字节，补充 `.gitattributes` 固定该文件 LF，同时明确 GLB 为二进制。模拟 `core.autocrlf=true` checkout 的字节一致性检查通过。这个仓库检出规则修复不改变已发布 macOS 二进制或资产，不重写已发布 tag。
+
+公开预览版发布完成不等于新版 Rhino 宿主、PBR 或 Windows 原生验收完成；这些门槛仍保留。

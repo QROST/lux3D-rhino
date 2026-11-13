@@ -1,0 +1,3 @@
+# Fixture manifests are compared byte-for-byte on macOS and Windows.
+/fixtures/manifest.json text eol=lf
+*.glb binary

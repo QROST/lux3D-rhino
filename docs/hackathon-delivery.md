@@ -4,10 +4,10 @@
 
 ## 公开状态
 
-- Yak：已公开 `0.1.4-beta.4`，macOS / Rhino 8.32+，需开启预发布版本。
-- GitHub：main 为 `29a73abb`（本轮修改前）；公开 tags 和 Releases 均为空。
-- 当前源码候选：`0.1.4-beta.6`，尚未发布。Windows 仍未完成真实宿主验收。
-- 公开 beta.4 包 SHA-256：`94a6e523824e191291a55e1b8f53384c393d35c3d6ff7a168558609e1a521cd5`。
+- Yak：已公开 `0.1.4-beta.6`，macOS / Rhino 8.32+，需开启预发布版本。
+- GitHub：发布源码为 `56f4c15`，tag 和 Release 为 `v0.1.4-beta.6`。
+- 当前公开预览：`0.1.4-beta.6`。Windows 仍未完成真实宿主验收。
+- 公开 beta.6 包 SHA-256：`b9becb3d34c71604c2322737d0405249605abe997dc76d885767f946efcdee35`。
 
 ## 首要交付闭环
 
@@ -30,7 +30,7 @@
 | PBR base color/metallic/roughness/normal | 未完成视觉验收 | Rendered 视图逐通道比较并记录截图 |
 | 安装包文件隔离 | 共享允许清单与自动测试 | 候选包与安装逐文件校验 |
 | Windows | 自动化 CI 已加入，尚未在线运行 | Windows 构建测试及真实 Rhino 验收 |
-| GitHub Release / 新 Yak | 尚未发布本轮候选 | 确定版本及验收结果后发布并复核公开哈希 |
+| GitHub Release / 新 Yak | beta.6 已发布；Yak 公开下载哈希匹配 | 预览版发布完成，宿主验收独立保留 |
 | 报告 / 演示录屏 | 本文件提供结构 | PDF/PPT 和真实运行影片完成 |
 
 查询退避、Retry-After 提示和原始服务状态持久化已在 beta.6 源码补齐；后续安装及测试见 verification.md。当前允许用户主动配置两个区域的预览连接，但未证明两个区域均完成服务验收；与 PRD 的区域发布门槛差异尚未关闭，不能宣称双区域已验收。
